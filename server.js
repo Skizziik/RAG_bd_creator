@@ -340,48 +340,81 @@ app.post('/api/wiki/batch/start', async (req, res) => {
 
 // ---- CHUNK REPORT (Discord webhook) ----
 const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1478226992934682704/nq5mfqcsgvrQpr6egSQ0ClccY4aUZr2qGSwseOCV4QRd2DyMp81-qfvP4BJrqE_s-lmM';
+const REPORT_COUNTER_FILE = path.join(__dirname, 'data', 'report-counter.json');
+
+function nextReportId() {
+  let counter = 0;
+  try { counter = JSON.parse(fs.readFileSync(REPORT_COUNTER_FILE, 'utf8')).count || 0; } catch {}
+  counter++;
+  fs.mkdirSync(path.dirname(REPORT_COUNTER_FILE), { recursive: true });
+  fs.writeFileSync(REPORT_COUNTER_FILE, JSON.stringify({ count: counter }));
+  return String(counter).padStart(4, '0');
+}
 
 app.post('/api/report', async (req, res) => {
   const { project, category, chunkId, chunkText, metadata, customFields, reason, comment } = req.body;
   if (!chunkId || !reason) {
     return res.status(400).json({ error: 'chunkId and reason are required' });
   }
+  const reportId = nextReportId();
 
-  const fields = [
-    { name: 'Project', value: project || '—', inline: true },
-    { name: 'Category', value: category || '—', inline: true },
-    { name: 'Reason', value: reason, inline: true },
-  ];
+  const textTrunc = (chunkText || '').length > 800 ? chunkText.substring(0, 797) + '...' : (chunkText || '—');
+  const source = metadata && metadata.source ? metadata.source : '';
 
-  if (comment) fields.push({ name: 'Comment', value: comment });
-
-  const text = (chunkText || '').length > 1024 ? chunkText.substring(0, 1021) + '...' : (chunkText || '—');
-  fields.push({ name: 'Text', value: text });
-
-  if (metadata && metadata.source) {
-    fields.push({ name: 'Source', value: metadata.source, inline: true });
-  }
+  let desc = '';
+  desc += `**Project:** ${project || '—'}\n`;
+  desc += `**Category:** ${category || '—'}\n`;
+  desc += `**Reason:** ${reason}\n`;
+  if (comment) desc += `\n**Comment:**\n${comment}\n`;
+  desc += `\n**Text:**\n> ${textTrunc.split('\n').join('\n> ')}\n`;
+  if (source) desc += `\n[Source](${source})`;
 
   if (customFields && customFields.length) {
-    const cfText = customFields.map(f => `**${f.key}**: ${f.value}`).join('\n');
-    if (cfText) fields.push({ name: 'Custom Fields', value: cfText.substring(0, 1024) });
+    const cfText = customFields.map(f => `**${f.key}:** ${f.value}`).join(' | ');
+    if (cfText) desc += `\n\n${cfText}`;
   }
 
   try {
-    await fetch(DISCORD_WEBHOOK_URL, {
+    // Build multipart form with embed + project JSON attachment
+    const embed = {
+      title: `#${reportId} — ${chunkId}`.substring(0, 256),
+      color: 0xED4245,
+      description: desc.substring(0, 4096),
+      timestamp: new Date().toISOString(),
+    };
+
+    const boundary = '----ReportBoundary' + Date.now();
+    let body = '';
+    // JSON payload part
+    body += `--${boundary}\r\n`;
+    body += 'Content-Disposition: form-data; name="payload_json"\r\nContent-Type: application/json\r\n\r\n';
+    body += JSON.stringify({ embeds: [embed] }) + '\r\n';
+
+    // Project file attachment
+    if (project) {
+      try {
+        const projectData = store.exportProject(project);
+        const jsonStr = JSON.stringify(projectData, null, 2);
+        body += `--${boundary}\r\n`;
+        body += `Content-Disposition: form-data; name="files[0]"; filename="${project}.json"\r\nContent-Type: application/json\r\n\r\n`;
+        body += jsonStr + '\r\n';
+      } catch {}
+    }
+    body += `--${boundary}--\r\n`;
+
+    const dcRes = await fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        embeds: [{
-          title: `Chunk Report: "${chunkId}"`,
-          color: 0xED4245,
-          fields,
-          timestamp: new Date().toISOString(),
-        }],
-      }),
+      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
+      body,
     });
+    if (!dcRes.ok) {
+      const errBody = await dcRes.text();
+      console.error('Discord webhook error:', dcRes.status, errBody);
+      return res.status(502).json({ error: `Discord error: ${dcRes.status}` });
+    }
     res.json({ ok: true });
   } catch (e) {
+    console.error('Discord webhook fetch error:', e.message);
     res.status(500).json({ error: e.message });
   }
 });

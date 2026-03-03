@@ -403,7 +403,6 @@ class App {
       modalOverlay: $('#modalOverlay'),
       modalContent: $('#modalContent'),
       toastContainer: $('#toastContainer'),
-      chunkCountValue: $('#chunkCountValue'),
       importProjectBtn: $('#importProjectBtn'),
       importFileInput: $('#importFileInput'),
       searchChunkBtn: $('#searchChunkBtn'),
@@ -468,7 +467,6 @@ class App {
     this._renderProjectSelect();
     this._renderCategories();
     this._renderContent();
-    this._renderChunkCount();
     this._renderMcpStatus();
     if (this._onboardingStep !== null) {
       setTimeout(() => this._showOnboardingStep(), 50);
@@ -701,10 +699,6 @@ class App {
       </div>`;
 
     this._bindEditorEvents();
-  }
-
-  _renderChunkCount() {
-    this.els.chunkCountValue.textContent = this.store.getTotalChunks();
   }
 
   // ---- EDITOR EVENTS ----
@@ -1027,7 +1021,6 @@ class App {
       this._advanceOnboarding(3);
       // Re-render sidebar to update chunk name
       this._renderCategories();
-      this._renderChunkCount();
     } catch (err) {
       this._toast('Save failed: ' + err.message, 'error');
     }

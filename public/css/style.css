@@ -237,22 +237,6 @@ body {
   50%      { box-shadow: 0 0 8px var(--success), 0 0 20px rgba(56, 161, 105, 0.5); }
 }
 
-.chunk-counter {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  font-size: 12px;
-  color: var(--text-muted);
-  background: var(--bg-card);
-  padding: 4px 12px;
-  border-radius: var(--radius-md);
-  border: 1px solid var(--border);
-}
-
-.chunk-counter i {
-  color: var(--accent);
-}
-
 /* =============================================
    BUTTONS
    ============================================= */
