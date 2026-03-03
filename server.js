@@ -376,7 +376,6 @@ app.post('/api/report', async (req, res) => {
   }
 
   try {
-    // Build multipart form with embed + project JSON attachment
     const embed = {
       title: `#${reportId} — ${chunkId}`.substring(0, 256),
       color: 0xED4245,
@@ -384,29 +383,23 @@ app.post('/api/report', async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    const boundary = '----ReportBoundary' + Date.now();
-    let body = '';
-    // JSON payload part
-    body += `--${boundary}\r\n`;
-    body += 'Content-Disposition: form-data; name="payload_json"\r\nContent-Type: application/json\r\n\r\n';
-    body += JSON.stringify({ embeds: [embed] }) + '\r\n';
+    const form = new FormData();
+    form.append('payload_json', JSON.stringify({ embeds: [embed] }));
 
-    // Project file attachment
+    // Attach project JSON if not too large (Discord limit ~8MB)
     if (project) {
       try {
         const projectData = store.exportProject(project);
         const jsonStr = JSON.stringify(projectData, null, 2);
-        body += `--${boundary}\r\n`;
-        body += `Content-Disposition: form-data; name="files[0]"; filename="${project}.json"\r\nContent-Type: application/json\r\n\r\n`;
-        body += jsonStr + '\r\n';
+        if (jsonStr.length < 7 * 1024 * 1024) {
+          form.append('files[0]', new Blob([jsonStr], { type: 'application/json' }), `${project}.json`);
+        }
       } catch {}
     }
-    body += `--${boundary}--\r\n`;
 
     const dcRes = await fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
-      headers: { 'Content-Type': `multipart/form-data; boundary=${boundary}` },
-      body,
+      body: form,
     });
     if (!dcRes.ok) {
       const errBody = await dcRes.text();
