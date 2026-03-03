@@ -2019,9 +2019,9 @@ class App {
 
     // Cancel
     this._batchAbort = new AbortController();
+    this._batchLastStats = {};
     $('#batchCancelBtn').addEventListener('click', () => {
       this._batchAbort.abort();
-      this._batchLog('Import cancelled by user', 'error');
     });
 
     // SSE stream
@@ -2061,15 +2061,22 @@ class App {
         }
       }
     } catch (e) {
-      if (e.name !== 'AbortError') {
+      if (e.name === 'AbortError') {
+        this._batchShowComplete({ ...this._batchLastStats, project: this._batchProjectName }, true);
+      } else {
         this._batchLog(`Connection error: ${e.message}`, 'error');
+        clearInterval(this._batchTimer);
       }
+      return;
     }
 
     clearInterval(this._batchTimer);
   }
 
   _handleBatchEvent(type, data) {
+    if (type === 'progress' || type === 'category-done' || type === 'status') {
+      this._batchLastStats = data;
+    }
     if (type === 'progress') {
       const catEl = $('#batchStatCat');
       const pageEl = $('#batchStatPage');
