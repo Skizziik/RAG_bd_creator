@@ -467,9 +467,7 @@ class App {
   render() {
     this._renderProjectSelect();
     this._renderCategories();
-    if (!this._batchImporting) {
-      this._renderContent();
-    }
+    this._renderContent();
     this._renderChunkCount();
     this._renderMcpStatus();
     if (this._onboardingStep !== null) {
@@ -1962,19 +1960,24 @@ class App {
   }
 
   async _startBatchImport(apiBase, wikiName, categories, projectName) {
-    this._batchImporting = true;
-    // Render Control Center
-    this.els.content.innerHTML = `
-      <div class="batch-control-center">
-        <div class="batch-header">
-          <i class="bi bi-globe2"></i>
-          <div>
-            <h2>Importing: ${this._esc(wikiName)}</h2>
-            <div class="batch-subtitle">${categories.length} categories selected</div>
-          </div>
-        </div>
+    // Remove any existing panel
+    const old = document.querySelector('.batch-panel');
+    if (old) old.remove();
 
-        <div class="batch-stats-grid">
+    // Create floating panel
+    const panel = document.createElement('div');
+    panel.className = 'batch-panel';
+    panel.innerHTML = `
+      <div class="batch-panel-header" id="batchPanelHeader">
+        <i class="bi bi-globe2"></i>
+        <div class="batch-panel-title">
+          Importing: ${this._esc(wikiName)}
+          <small>${categories.length} cat</small>
+        </div>
+        <button class="batch-panel-toggle" id="batchToggle" title="Collapse"><i class="bi bi-dash-lg"></i></button>
+      </div>
+      <div class="batch-panel-body">
+        <div class="batch-stats-row">
           <div class="batch-stat">
             <div class="batch-stat-label">Categories</div>
             <div class="batch-stat-value" id="batchStatCat">0 / ${categories.length}</div>
@@ -1986,11 +1989,11 @@ class App {
             <div class="batch-progress-bar"><div class="batch-progress-fill" id="batchBarPage"></div></div>
           </div>
           <div class="batch-stat">
-            <div class="batch-stat-label">Chunks Created</div>
+            <div class="batch-stat-label">Chunks</div>
             <div class="batch-stat-value" id="batchStatChunks">0</div>
           </div>
           <div class="batch-stat">
-            <div class="batch-stat-label">Errors / Skipped</div>
+            <div class="batch-stat-label">Err / Skip</div>
             <div class="batch-stat-value" id="batchStatErrors">0 / 0</div>
           </div>
         </div>
@@ -2008,22 +2011,39 @@ class App {
 
         <div class="batch-actions" id="batchActions">
           <button class="btn btn-danger" id="batchCancelBtn">
-            <i class="bi bi-x-circle"></i> Cancel Import
+            <i class="bi bi-x-circle"></i> Cancel
           </button>
         </div>
       </div>`;
+    document.body.appendChild(panel);
+
+    // Toggle collapse
+    panel.querySelector('#batchToggle').addEventListener('click', (e) => {
+      e.stopPropagation();
+      panel.classList.toggle('batch-panel--collapsed');
+      const icon = panel.querySelector('#batchToggle i');
+      icon.className = panel.classList.contains('batch-panel--collapsed') ? 'bi bi-plus-lg' : 'bi bi-dash-lg';
+    });
+    panel.querySelector('#batchPanelHeader').addEventListener('click', () => {
+      if (panel.classList.contains('batch-panel--collapsed')) {
+        panel.classList.remove('batch-panel--collapsed');
+        panel.querySelector('#batchToggle i').className = 'bi bi-dash-lg';
+      }
+    });
 
     // Timer
     const startTime = Date.now();
     this._batchTimer = setInterval(() => {
-      const el = $('#batchElapsed');
+      const el = panel.querySelector('#batchElapsed');
       if (el) el.textContent = this._formatElapsed(Date.now() - startTime);
     }, 1000);
 
     // Cancel
     this._batchAbort = new AbortController();
     this._batchLastStats = {};
-    $('#batchCancelBtn').addEventListener('click', () => {
+    this._batchProjectName = projectName;
+    this._batchPanel = panel;
+    panel.querySelector('#batchCancelBtn').addEventListener('click', () => {
       this._batchAbort.abort();
     });
 
@@ -2077,18 +2097,21 @@ class App {
   }
 
   _handleBatchEvent(type, data) {
+    const panel = this._batchPanel;
+    if (!panel) return;
+
     if (type === 'progress' || type === 'category-done' || type === 'status') {
       this._batchLastStats = data;
     }
     if (type === 'progress') {
-      const catEl = $('#batchStatCat');
-      const pageEl = $('#batchStatPage');
-      const chunkEl = $('#batchStatChunks');
-      const errEl = $('#batchStatErrors');
-      const catBar = $('#batchBarCat');
-      const pageBar = $('#batchBarPage');
-      const currentOp = $('#batchCurrentOp');
-      const etaEl = $('#batchEta');
+      const catEl = panel.querySelector('#batchStatCat');
+      const pageEl = panel.querySelector('#batchStatPage');
+      const chunkEl = panel.querySelector('#batchStatChunks');
+      const errEl = panel.querySelector('#batchStatErrors');
+      const catBar = panel.querySelector('#batchBarCat');
+      const pageBar = panel.querySelector('#batchBarPage');
+      const currentOp = panel.querySelector('#batchCurrentOp');
+      const etaEl = panel.querySelector('#batchEta');
 
       if (catEl) catEl.textContent = `${data.categoriesDone} / ${data.categoriesTotal}`;
       if (pageEl) pageEl.textContent = `${data.pagesDone} / ${data.pagesTotal}`;
@@ -2115,8 +2138,8 @@ class App {
     }
 
     if (type === 'category-done') {
-      const catEl = $('#batchStatCat');
-      const catBar = $('#batchBarCat');
+      const catEl = panel.querySelector('#batchStatCat');
+      const catBar = panel.querySelector('#batchBarCat');
       if (catEl) catEl.textContent = `${data.categoriesDone} / ${data.categoriesTotal}`;
       if (catBar && data.categoriesTotal) catBar.style.width = `${(data.categoriesDone / data.categoriesTotal) * 100}%`;
       this._batchLog(`Category "${data.category}" done`, 'success');
@@ -2144,7 +2167,9 @@ class App {
   }
 
   _batchLog(message, type = '') {
-    const log = $('#batchLog');
+    const panel = this._batchPanel;
+    if (!panel) return;
+    const log = panel.querySelector('#batchLog');
     if (!log) return;
     const cls = type ? ` batch-log-entry--${type}` : '';
     const entry = document.createElement('div');
@@ -2155,41 +2180,57 @@ class App {
   }
 
   _batchShowComplete(data, cancelled = false) {
-    this._batchImporting = false;
     clearInterval(this._batchTimer);
+    const panel = this._batchPanel;
+    if (!panel) return;
 
     const projectName = data.project || this._batchProjectName;
     const elapsed = this._formatElapsed(data.elapsed || 0);
 
-    const content = $('#batchCurrentOp');
-    const actions = $('#batchActions');
-    const catBar = $('#batchBarCat');
-    const pageBar = $('#batchBarPage');
+    panel.classList.add(cancelled ? 'batch-panel--cancelled' : 'batch-panel--done');
+    // Expand if collapsed so user sees the result
+    panel.classList.remove('batch-panel--collapsed');
+    const toggleIcon = panel.querySelector('#batchToggle i');
+    if (toggleIcon) toggleIcon.className = 'bi bi-dash-lg';
+
+    const currentOp = panel.querySelector('#batchCurrentOp');
+    const actions = panel.querySelector('#batchActions');
+    const catBar = panel.querySelector('#batchBarCat');
+    const pageBar = panel.querySelector('#batchBarPage');
 
     if (!cancelled) {
       if (catBar) catBar.style.width = '100%';
       if (pageBar) pageBar.style.width = '100%';
     }
 
-    if (content) {
-      content.innerHTML = cancelled
+    if (currentOp) {
+      currentOp.innerHTML = cancelled
         ? '<i class="bi bi-pause-circle" style="color:var(--text-secondary)"></i> Import cancelled'
         : '<i class="bi bi-check-circle" style="color:#34d399"></i> Import complete!';
     }
 
-    const summary = `${data.categoriesDone} categories, ${data.pagesDone} pages, ${data.chunksCreated} chunks — ${elapsed}`;
+    const summary = `${data.categoriesDone || 0} categories, ${data.pagesDone || 0} pages, ${data.chunksCreated || 0} chunks — ${elapsed}`;
     this._batchLog(cancelled ? `Cancelled. ${summary}` : `Done! ${summary}`, cancelled ? 'error' : 'success');
 
     if (actions) {
       actions.innerHTML = `
         <button class="btn btn-accent" id="batchOpenProject">
           <i class="bi bi-folder2-open"></i> Open Project
+        </button>
+        <button class="btn btn-secondary" id="batchClosePanel">
+          <i class="bi bi-x-lg"></i> Close
         </button>`;
-      $('#batchOpenProject').addEventListener('click', async () => {
+      panel.querySelector('#batchOpenProject').addEventListener('click', async () => {
         if (projectName) {
           await this.store.refreshProjectList();
           await this.store.selectProject(projectName);
         }
+        panel.remove();
+        this._batchPanel = null;
+      });
+      panel.querySelector('#batchClosePanel').addEventListener('click', () => {
+        panel.remove();
+        this._batchPanel = null;
       });
     }
   }
