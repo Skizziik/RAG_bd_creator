@@ -999,6 +999,7 @@ body {
   display: flex;
   gap: 10px;
   justify-content: flex-end;
+  margin-top: 18px;
 }
 
 /* FAQ modal */

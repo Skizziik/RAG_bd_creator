@@ -17,7 +17,15 @@
       "Bash(git add index.js package.json)",
       "Bash(npm publish)",
       "Bash(git add public/js/app.js)",
-      "Bash(git add -A)"
+      "Bash(git add -A)",
+      "Bash(git push origin main)",
+      "Bash(git add index.js)",
+      "Bash(git add README.md)",
+      "Bash(git add index.js lib/store.js package.json README.md)",
+      "Bash(git add lib/store.js)",
+      "Bash(git add public/js/app.js public/css/style.css)",
+      "WebFetch(domain:terraria.wiki.gg)",
+      "WebFetch(domain:minecraft.wiki)"
     ]
   }
 }
