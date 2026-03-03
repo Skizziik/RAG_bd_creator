@@ -467,7 +467,9 @@ class App {
   render() {
     this._renderProjectSelect();
     this._renderCategories();
-    this._renderContent();
+    if (!this._batchImporting) {
+      this._renderContent();
+    }
     this._renderChunkCount();
     this._renderMcpStatus();
     if (this._onboardingStep !== null) {
@@ -1960,6 +1962,7 @@ class App {
   }
 
   async _startBatchImport(apiBase, wikiName, categories, projectName) {
+    this._batchImporting = true;
     // Render Control Center
     this.els.content.innerHTML = `
       <div class="batch-control-center">
@@ -2122,6 +2125,8 @@ class App {
     if (type === 'started') {
       this._batchProjectName = data.project;
       this._batchLog(`Project "${data.project}" created`, 'success');
+      // Load project in sidebar so it appears immediately
+      this.store.refreshProjectList().then(() => this.store.selectProject(data.project));
     }
 
     if (type === 'complete') {
@@ -2150,6 +2155,7 @@ class App {
   }
 
   _batchShowComplete(data, cancelled = false) {
+    this._batchImporting = false;
     clearInterval(this._batchTimer);
 
     const projectName = data.project || this._batchProjectName;
