@@ -4,6 +4,7 @@ const path = require('path');
 const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { Store } = require('./lib/store');
+const { parseUrl } = require('./lib/wiki');
 
 const app = express();
 const server = http.createServer(app);
@@ -256,6 +257,18 @@ app.post('/api/projects/:name/history/:commitId/rollback', (req, res) => {
     if (req.body.session) broadcastToBrowsers(req.body.session, 'data:changed', { project: req.params.name });
     res.json(result);
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// ---- WIKI IMPORT ----
+
+app.post('/api/wiki/parse', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+    try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    const result = await parseUrl(url);
+    res.json(result);
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ---- SPA FALLBACK ----

@@ -1067,6 +1067,25 @@ body {
   color: var(--accent);
 }
 
+/* Wiki import */
+.wiki-import-status {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin: 12px 0 0;
+  padding: 8px 12px;
+  background: var(--bg-input);
+  border-radius: var(--radius-md);
+}
+
+.wiki-import-status.hidden { display: none; }
+
+.wiki-import-error {
+  color: var(--danger);
+  background: rgba(239, 68, 68, 0.08);
+}
+
+.input-error { border-color: var(--danger) !important; }
+
 /* =============================================
    TOAST NOTIFICATIONS
    ============================================= */

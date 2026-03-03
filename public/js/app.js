@@ -36,6 +36,30 @@ async function api(path, opts = {}) {
   return data;
 }
 
+function splitTextIntoChunks(text, baseId, limit = 2000) {
+  if (text.length <= limit) return [{ id: baseId, text }];
+  const chunks = [];
+  let remaining = text;
+  let index = 1;
+  while (remaining.length > 0) {
+    let cutPoint = limit;
+    if (remaining.length > limit) {
+      const paraBreak = remaining.lastIndexOf('\n\n', limit);
+      if (paraBreak > limit * 0.3) { cutPoint = paraBreak; }
+      else {
+        const sentBreak = remaining.lastIndexOf('. ', limit);
+        if (sentBreak > limit * 0.3) cutPoint = sentBreak + 1;
+      }
+    } else {
+      cutPoint = remaining.length;
+    }
+    chunks.push({ id: `${baseId}_${index}`, text: remaining.substring(0, cutPoint).trim() });
+    remaining = remaining.substring(cutPoint).trim();
+    index++;
+  }
+  return chunks;
+}
+
 // =============================================
 // STORE — State management via REST API
 // =============================================
@@ -606,6 +630,9 @@ class App {
             Chunk Editor
           </div>
           <div class="editor-actions">
+            <button class="btn btn-ghost" id="importWikiBtn" title="Import from Wiki">
+              <i class="bi bi-globe2"></i> Wiki
+            </button>
             <button class="btn btn-ghost" id="duplicateChunkBtn" title="Duplicate">
               <i class="bi bi-copy"></i> Duplicate
             </button>
@@ -678,10 +705,13 @@ class App {
     const addCfBtn = $('#addCustomFieldBtn');
     const cfContainer = $('#customFieldsContainer');
 
+    const importWikiBtn = $('#importWikiBtn');
+
     if (saveBtn) saveBtn.addEventListener('click', () => this._saveCurrentChunk());
     if (deleteBtn) deleteBtn.addEventListener('click', () => this._deleteCurrentChunk());
     if (duplicateBtn) duplicateBtn.addEventListener('click', () => this._duplicateCurrentChunk());
     if (addCfBtn) addCfBtn.addEventListener('click', () => this._addCustomField());
+    if (importWikiBtn) importWikiBtn.addEventListener('click', () => this._showImportWikiModal());
 
     const chunkText = $('#chunkText');
     const charCount = $('#charCount');
@@ -1224,6 +1254,129 @@ class App {
     $('#modalClose').addEventListener('click', () => {
       this.els.modalContent.classList.remove('modal--faq');
       this._closeModal();
+    });
+  }
+
+  // ---- WIKI IMPORT ----
+
+  _showImportWikiModal() {
+    if (!this.selected) return;
+
+    this.els.modalContent.innerHTML = `
+      <div class="modal-title"><i class="bi bi-globe2"></i> Import from Wiki</div>
+      <p class="modal-text">Paste a wiki page URL. The content, title, and infobox data will be parsed into chunks.</p>
+      <input class="field-input" type="url" id="modalWikiUrl" placeholder="https://minecraft.wiki/w/Acacia_Log" autofocus>
+      <div id="wikiImportStatus" class="wiki-import-status hidden"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="modalCancel">Cancel</button>
+        <button class="btn btn-accent" id="modalConfirm"><i class="bi bi-download"></i> Import</button>
+      </div>`;
+    this.els.modalOverlay.classList.remove('hidden');
+
+    const input = $('#modalWikiUrl');
+    const confirm = $('#modalConfirm');
+    const cancel = $('#modalCancel');
+    const status = $('#wikiImportStatus');
+
+    const doImport = async () => {
+      const url = input.value.trim();
+      if (!url) { input.classList.add('input-error'); return; }
+      input.classList.remove('input-error');
+
+      confirm.disabled = true;
+      confirm.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Fetching...';
+      status.classList.remove('hidden', 'wiki-import-error');
+      status.textContent = 'Fetching and parsing page...';
+
+      try {
+        const parsed = await api('/wiki/parse', { method: 'POST', body: { url } });
+
+        // Generate base ID from page title
+        const baseId = (parsed.pageTitle || 'wiki')
+          .toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').substring(0, 60);
+
+        // Split text into chunks
+        const chunks = splitTextIntoChunks(parsed.text || '', baseId);
+
+        // Build custom fields from infobox
+        const customFields = Object.entries(parsed.infobox || {}).map(([key, value]) => ({ key, value }));
+
+        // Fill current chunk editor form
+        const firstChunk = chunks[0];
+        const chunkId = $('#chunkId');
+        const chunkText = $('#chunkText');
+        const metaPageTitle = $('#metaPageTitle');
+        const metaSource = $('#metaSource');
+        const charCount = $('#charCount');
+        const charCounter = $('#charCounter');
+
+        if (chunkId) chunkId.value = firstChunk.id;
+        if (chunkText) chunkText.value = firstChunk.text;
+        if (metaPageTitle) metaPageTitle.value = parsed.pageTitle || '';
+        if (metaSource) metaSource.value = parsed.source || '';
+        if (charCount) charCount.textContent = firstChunk.text.length;
+        if (charCounter) {
+          charCounter.classList.toggle('char-counter--warn', firstChunk.text.length >= 1800);
+          charCounter.classList.toggle('char-counter--limit', firstChunk.text.length >= 2000);
+        }
+
+        // Fill custom fields
+        const cfContainer = $('#customFieldsContainer');
+        if (cfContainer) {
+          cfContainer.innerHTML = '';
+          customFields.forEach((cf, i) => {
+            const row = document.createElement('div');
+            row.className = 'custom-field-row';
+            row.innerHTML = `
+              <input class="field-input custom-field-key" type="text" placeholder="Field name"
+                     value="${this._escAttr(cf.key)}" data-cf-index="${i}" data-cf-part="key">
+              <input class="field-input" type="text" placeholder="Value"
+                     value="${this._escAttr(cf.value)}" data-cf-index="${i}" data-cf-part="value">
+              <button class="btn-icon btn-icon--danger" data-action="remove-cf"
+                      data-cf-index="${i}" title="Remove field"><i class="bi bi-x-lg"></i></button>`;
+            cfContainer.appendChild(row);
+          });
+        }
+
+        // Create overflow chunks via bulk API
+        if (chunks.length > 1) {
+          const cat = this.store.currentProject.categories.find(c => c.id === this.selected.categoryId);
+          if (cat) {
+            const overflowData = chunks.slice(1).map(ch => ({
+              id: ch.id, text: ch.text,
+              metadata: {
+                page_title: parsed.pageTitle || '',
+                source: parsed.source || '',
+                license: ($('#metaLicense') || {}).value || CONFIG.DEFAULT_LICENSE,
+                ...Object.fromEntries(customFields.map(cf => [cf.key, cf.value])),
+              },
+            }));
+            await api(`/projects/${encodeURIComponent(this.store.currentProjectName)}/categories/${encodeURIComponent(cat.name)}/chunks/bulk`, {
+              method: 'POST',
+              body: { chunks: overflowData, session: this.store.sessionCode, source: 'browser' },
+            });
+            await this.store._loadProject(this.store.currentProjectName);
+            this.store._notify();
+          }
+          this._toast(`Wiki imported! ${chunks.length} chunks created.`, 'success');
+        } else {
+          this._toast('Wiki content imported! Review and save.', 'success');
+        }
+
+        this._closeModal();
+      } catch (err) {
+        status.textContent = err.message;
+        status.classList.add('wiki-import-error');
+        confirm.disabled = false;
+        confirm.innerHTML = '<i class="bi bi-download"></i> Import';
+      }
+    };
+
+    confirm.addEventListener('click', doImport);
+    cancel.addEventListener('click', () => this._closeModal());
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doImport();
+      if (e.key === 'Escape') this._closeModal();
     });
   }
 
