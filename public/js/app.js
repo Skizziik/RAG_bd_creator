@@ -1086,27 +1086,42 @@ class App {
       const project = this.store.currentProject || '';
       const category = this.selected.categoryId || '';
       const customFields = (chunk.customFields || []).map(f => ({ key: f.key, value: f.value }));
+      const chunkText = chunk.text || '';
+      const chunkId = chunk.id || '';
+      const meta = chunk.metadata || {};
 
       const btn = $('#reportSubmitBtn');
       btn.disabled = true;
       btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Sending...';
 
       try {
-        const res = await fetch('/api/report', {
+        const idRes = await fetch('/api/report/id', { method: 'POST' });
+        const { id: reportId } = await idRes.json();
+
+        const textTrunc = chunkText.length > 800 ? chunkText.substring(0, 797) + '...' : (chunkText || '\u2014');
+        let desc = `**Project:** ${project || '\u2014'}\n`;
+        desc += `**Category:** ${category || '\u2014'}\n`;
+        desc += `**Reason:** ${reason}\n`;
+        if (comment) desc += `\n**Comment:**\n${comment}\n`;
+        desc += `\n**Text:**\n> ${textTrunc.split('\n').join('\n> ')}\n`;
+        if (meta.source) desc += `\n[Source](${meta.source})`;
+        if (customFields.length) {
+          desc += '\n\n' + customFields.map(f => `**${f.key}:** ${f.value}`).join(' | ');
+        }
+
+        const dcRes = await fetch('https://discord.com/api/webhooks/1478226992934682704/nq5mfqcsgvrQpr6egSQ0ClccY4aUZr2qGSwseOCV4QRd2DyMp81-qfvP4BJrqE_s-lmM', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            project,
-            category,
-            chunkId: chunk.id || '',
-            chunkText: chunk.text || '',
-            metadata: chunk.metadata || {},
-            customFields,
-            reason,
-            comment,
+            embeds: [{
+              title: `#${reportId} \u2014 ${chunkId}`.substring(0, 256),
+              color: 0xED4245,
+              description: desc.substring(0, 4096),
+              timestamp: new Date().toISOString(),
+            }],
           }),
         });
-        if (!res.ok) throw new Error('Failed');
+        if (!dcRes.ok) throw new Error('Discord error');
         this._closeModal();
         this._toast('Report sent!', 'success');
       } catch (e) {

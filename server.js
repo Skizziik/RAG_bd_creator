@@ -339,68 +339,16 @@ app.post('/api/wiki/batch/start', async (req, res) => {
   res.end();
 });
 
-// ---- CHUNK REPORT (Discord webhook) ----
-const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1478226992934682704/nq5mfqcsgvrQpr6egSQ0ClccY4aUZr2qGSwseOCV4QRd2DyMp81-qfvP4BJrqE_s-lmM';
+// ---- CHUNK REPORT (ID generator) ----
 const REPORT_COUNTER_FILE = path.join(__dirname, 'data', 'report-counter.json');
 
-function nextReportId() {
+app.post('/api/report/id', (_req, res) => {
   let counter = 0;
   try { counter = JSON.parse(fs.readFileSync(REPORT_COUNTER_FILE, 'utf8')).count || 0; } catch {}
   counter++;
   fs.mkdirSync(path.dirname(REPORT_COUNTER_FILE), { recursive: true });
   fs.writeFileSync(REPORT_COUNTER_FILE, JSON.stringify({ count: counter }));
-  return String(counter).padStart(4, '0');
-}
-
-app.post('/api/report', async (req, res) => {
-  const { project, category, chunkId, chunkText, metadata, customFields, reason, comment } = req.body;
-  if (!chunkId || !reason) {
-    return res.status(400).json({ error: 'chunkId and reason are required' });
-  }
-  const reportId = nextReportId();
-
-  const textTrunc = (chunkText || '').length > 800 ? chunkText.substring(0, 797) + '...' : (chunkText || '—');
-  const source = metadata && metadata.source ? metadata.source : '';
-
-  let desc = '';
-  desc += `**Project:** ${project || '—'}\n`;
-  desc += `**Category:** ${category || '—'}\n`;
-  desc += `**Reason:** ${reason}\n`;
-  if (comment) desc += `\n**Comment:**\n${comment}\n`;
-  desc += `\n**Text:**\n> ${textTrunc.split('\n').join('\n> ')}\n`;
-  if (source) desc += `\n[Source](${source})`;
-
-  if (customFields && customFields.length) {
-    const cfText = customFields.map(f => `**${f.key}:** ${f.value}`).join(' | ');
-    if (cfText) desc += `\n\n${cfText}`;
-  }
-
-  try {
-    const embed = {
-      title: `#${reportId} — ${chunkId}`.substring(0, 256),
-      color: 0xED4245,
-      description: desc.substring(0, 4096),
-      timestamp: new Date().toISOString(),
-    };
-
-    const dcRes = await fetch(DISCORD_WEBHOOK_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
-      },
-      body: JSON.stringify({ embeds: [embed] }),
-    });
-    if (!dcRes.ok) {
-      const errBody = await dcRes.text();
-      console.error('Discord webhook error:', dcRes.status, errBody);
-      return res.status(502).json({ error: `Discord error: ${dcRes.status}` });
-    }
-    res.json({ ok: true });
-  } catch (e) {
-    console.error('Discord webhook fetch error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
+  res.json({ id: String(counter).padStart(4, '0') });
 });
 
 // ---- SPA FALLBACK ----
