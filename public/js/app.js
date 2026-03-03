@@ -644,6 +644,9 @@ class App {
             <button class="btn btn-ghost" id="duplicateChunkBtn" title="Duplicate">
               <i class="bi bi-copy"></i> Duplicate
             </button>
+            <button class="btn btn-ghost" id="reportChunkBtn" title="Report">
+              <i class="bi bi-flag"></i>
+            </button>
             <button class="btn btn-danger" id="deleteChunkBtn">
               <i class="bi bi-trash3"></i> Delete
             </button>
@@ -714,12 +717,14 @@ class App {
     const cfContainer = $('#customFieldsContainer');
 
     const importWikiBtn = $('#importWikiBtn');
+    const reportBtn = $('#reportChunkBtn');
 
     if (saveBtn) saveBtn.addEventListener('click', () => this._saveCurrentChunk());
     if (deleteBtn) deleteBtn.addEventListener('click', () => this._deleteCurrentChunk());
     if (duplicateBtn) duplicateBtn.addEventListener('click', () => this._duplicateCurrentChunk());
     if (addCfBtn) addCfBtn.addEventListener('click', () => this._addCustomField());
     if (importWikiBtn) importWikiBtn.addEventListener('click', () => this._showImportWikiModal());
+    if (reportBtn) reportBtn.addEventListener('click', () => this._showReportModal());
 
     const chunkText = $('#chunkText');
     const charCount = $('#charCount');
@@ -1047,6 +1052,67 @@ class App {
       this.selected = null;
       this._closeModal();
       this._toast('Chunk deleted.', 'info');
+    });
+    $('#modalCancel').addEventListener('click', () => this._closeModal());
+  }
+
+  _showReportModal() {
+    if (!this.selected) return;
+    const chunk = this.store.getChunk(this.selected.categoryId, this.selected.chunkUid);
+    if (!chunk) return;
+    const label = chunk.id || 'untitled';
+
+    this.els.modalContent.innerHTML = `
+      <div class="modal-title"><i class="bi bi-flag" style="color:var(--accent)"></i> Report Chunk</div>
+      <p class="modal-text">Report <strong>${this._esc(label)}</strong> — select a reason:</p>
+      <div class="report-reasons">
+        <label class="report-reason"><input type="radio" name="reportReason" value="Bad parsing" checked> Bad parsing</label>
+        <label class="report-reason"><input type="radio" name="reportReason" value="Missing info"> Missing info</label>
+        <label class="report-reason"><input type="radio" name="reportReason" value="Wrong data"> Wrong data</label>
+        <label class="report-reason"><input type="radio" name="reportReason" value="Other"> Other</label>
+      </div>
+      <textarea class="field-textarea" id="reportComment" placeholder="Optional comment..." rows="3" style="margin-top:12px"></textarea>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="modalCancel">Cancel</button>
+        <button class="btn btn-accent" id="reportSubmitBtn"><i class="bi bi-send"></i> Send Report</button>
+      </div>`;
+    this.els.modalOverlay.classList.remove('hidden');
+
+    $('#reportSubmitBtn').addEventListener('click', async () => {
+      const reason = this.els.modalContent.querySelector('input[name="reportReason"]:checked')?.value || 'Other';
+      const comment = $('#reportComment')?.value?.trim() || '';
+
+      const project = this.store.currentProject || '';
+      const category = this.selected.categoryId || '';
+      const customFields = (chunk.customFields || []).map(f => ({ key: f.key, value: f.value }));
+
+      const btn = $('#reportSubmitBtn');
+      btn.disabled = true;
+      btn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Sending...';
+
+      try {
+        const res = await fetch('/api/report', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project,
+            category,
+            chunkId: chunk.id || '',
+            chunkText: chunk.text || '',
+            metadata: chunk.metadata || {},
+            customFields,
+            reason,
+            comment,
+          }),
+        });
+        if (!res.ok) throw new Error('Failed');
+        this._closeModal();
+        this._toast('Report sent!', 'success');
+      } catch (e) {
+        btn.disabled = false;
+        btn.innerHTML = '<i class="bi bi-send"></i> Send Report';
+        this._toast('Failed to send report', 'error');
+      }
     });
     $('#modalCancel').addEventListener('click', () => this._closeModal());
   }

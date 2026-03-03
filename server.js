@@ -338,6 +338,54 @@ app.post('/api/wiki/batch/start', async (req, res) => {
   res.end();
 });
 
+// ---- CHUNK REPORT (Discord webhook) ----
+const DISCORD_WEBHOOK_URL = 'https://discord.com/api/webhooks/1478226992934682704/nq5mfqcsgvrQpr6egSQ0ClccY4aUZr2qGSwseOCV4QRd2DyMp81-qfvP4BJrqE_s-lmM';
+
+app.post('/api/report', async (req, res) => {
+  const { project, category, chunkId, chunkText, metadata, customFields, reason, comment } = req.body;
+  if (!chunkId || !reason) {
+    return res.status(400).json({ error: 'chunkId and reason are required' });
+  }
+
+  const fields = [
+    { name: 'Project', value: project || '—', inline: true },
+    { name: 'Category', value: category || '—', inline: true },
+    { name: 'Reason', value: reason, inline: true },
+  ];
+
+  if (comment) fields.push({ name: 'Comment', value: comment });
+
+  const text = (chunkText || '').length > 1024 ? chunkText.substring(0, 1021) + '...' : (chunkText || '—');
+  fields.push({ name: 'Text', value: text });
+
+  if (metadata && metadata.source) {
+    fields.push({ name: 'Source', value: metadata.source, inline: true });
+  }
+
+  if (customFields && customFields.length) {
+    const cfText = customFields.map(f => `**${f.key}**: ${f.value}`).join('\n');
+    if (cfText) fields.push({ name: 'Custom Fields', value: cfText.substring(0, 1024) });
+  }
+
+  try {
+    await fetch(DISCORD_WEBHOOK_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        embeds: [{
+          title: `Chunk Report: "${chunkId}"`,
+          color: 0xED4245,
+          fields,
+          timestamp: new Date().toISOString(),
+        }],
+      }),
+    });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ---- SPA FALLBACK ----
 app.get('*', (_req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'index.html'));
