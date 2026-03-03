@@ -25,7 +25,10 @@
       "Bash(git add lib/store.js)",
       "Bash(git add public/js/app.js public/css/style.css)",
       "WebFetch(domain:terraria.wiki.gg)",
-      "WebFetch(domain:minecraft.wiki)"
+      "WebFetch(domain:minecraft.wiki)",
+      "Bash(curl -s \"https://mewgenics.wiki.gg/api.php?action=parse&page=Alloy_Armor&format=json&prop=text&disablelimitreport=1&disableeditsection=1\" -H \"User-Agent: TryllDatasetBuilder/1.3\")",
+      "Bash(node -e \":*)",
+      "Bash(curl -s -N -X POST http://localhost:3000/api/wiki/batch/start -H \"Content-Type: application/json\" -d '{\"\"apiBase\"\":\"\"https://mewgenics.wiki.gg/api.php\"\",\"\"wikiName\"\":\"\"mewgenics_test2\"\",\"\"categories\"\":[\"\"Birds\"\"]}' --max-time 30)"
     ]
   }
 }

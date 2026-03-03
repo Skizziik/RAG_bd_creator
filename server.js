@@ -5,6 +5,7 @@ const crypto = require('crypto');
 const { WebSocketServer } = require('ws');
 const { Store } = require('./lib/store');
 const { parseUrl } = require('./lib/wiki');
+const { detectWikiFromUrl, fetchAllCategories, filterCategories, runBatchImport } = require('./lib/wiki-batch');
 
 const app = express();
 const server = http.createServer(app);
@@ -269,6 +270,72 @@ app.post('/api/wiki/parse', async (req, res) => {
     const result = await parseUrl(url);
     res.json(result);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- BATCH WIKI IMPORT ----
+app.post('/api/wiki/batch/detect', (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+    try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    const result = detectWikiFromUrl(url);
+    res.json(result);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+app.post('/api/wiki/batch/categories', async (req, res) => {
+  try {
+    const { apiBase } = req.body;
+    if (!apiBase) return res.status(400).json({ error: 'apiBase is required' });
+    const all = await fetchAllCategories(apiBase);
+    const { accepted, rejected } = filterCategories(all);
+    const categories = [
+      ...accepted.map(c => ({ ...c, accepted: true })),
+      ...rejected.map(c => ({ ...c, accepted: false })),
+    ];
+    res.json({ categories, totalRaw: all.length, totalAccepted: accepted.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/wiki/batch/start', async (req, res) => {
+  const { apiBase, wikiName, categories, session } = req.body;
+  if (!apiBase || !categories || !categories.length) {
+    return res.status(400).json({ error: 'apiBase and categories are required' });
+  }
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const sseWriter = {
+    write(event, data) { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); },
+    end() { res.end(); },
+  };
+
+  const controller = new AbortController();
+  res.on('close', () => controller.abort());
+
+  try {
+    await runBatchImport({
+      apiBase,
+      wikiName: wikiName || 'wiki',
+      categories,
+      projectName: `${wikiName || 'wiki'}_knowledge_base`,
+      store,
+      broadcastFn: broadcastToBrowsers,
+      sessionCode: session,
+      sseWriter,
+      signal: controller.signal,
+    });
+  } catch (e) {
+    if (e.message !== 'aborted') {
+      sseWriter.write('error', { message: e.message });
+    }
+  }
+  res.end();
 });
 
 // ---- SPA FALLBACK ----

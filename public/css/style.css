@@ -1308,6 +1308,237 @@ body {
 }
 
 /* =============================================
+   BATCH WIKI IMPORT
+   ============================================= */
+
+/* Wider modal for category selection */
+.modal--batch { max-width: 640px; min-width: 480px; }
+
+/* Category selection */
+.batch-category-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.batch-category-controls .btn { font-size: 12px; padding: 4px 10px; }
+
+.batch-category-count {
+  font-size: 12px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+.batch-category-search {
+  width: 100%;
+  height: 36px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  color: var(--text-primary);
+  padding: 0 10px;
+  font-size: 13px;
+  margin-bottom: 10px;
+  transition: border-color var(--transition);
+}
+
+.batch-category-search:focus {
+  border-color: var(--accent);
+  outline: none;
+}
+
+.batch-category-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+  padding-right: 6px;
+  margin-bottom: 16px;
+}
+
+.batch-category-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 8px;
+  border-radius: var(--radius-sm);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background var(--transition);
+}
+
+.batch-category-item:hover { background: rgba(255,255,255,0.03); }
+.batch-category-item.filtered { opacity: 0.35; }
+.batch-category-item input[type="checkbox"] { accent-color: var(--accent); }
+
+.batch-category-item .cat-size {
+  font-size: 11px;
+  color: var(--text-secondary);
+  margin-left: auto;
+}
+
+/* Control Center */
+.batch-control-center {
+  max-width: 700px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 40px 20px;
+  opacity: 0;
+  animation: fadeIn 400ms ease forwards;
+}
+
+.batch-header {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-bottom: 32px;
+}
+
+.batch-header i { font-size: 28px; color: var(--accent); }
+
+.batch-header h2 {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0;
+}
+
+.batch-header .batch-subtitle {
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-top: 2px;
+}
+
+/* Stats grid */
+.batch-stats-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin-bottom: 24px;
+}
+
+.batch-stat {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  padding: 16px 20px;
+}
+
+.batch-stat-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  margin-bottom: 6px;
+}
+
+.batch-stat-value {
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--text-primary);
+  font-family: var(--font-heading);
+}
+
+/* Progress bars */
+.batch-progress-bar {
+  height: 4px;
+  background: var(--bg-input);
+  border-radius: 2px;
+  margin-top: 10px;
+  overflow: hidden;
+}
+
+.batch-progress-fill {
+  height: 100%;
+  background: var(--accent);
+  border-radius: 2px;
+  transition: width 300ms ease;
+  width: 0%;
+}
+
+/* Current operation */
+.batch-current-op {
+  font-size: 14px;
+  color: var(--text-secondary);
+  padding: 12px 16px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  margin-bottom: 14px;
+}
+
+/* Timing */
+.batch-timing {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 14px;
+  padding: 0 4px;
+}
+
+/* Activity log */
+.batch-log {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 12px;
+  max-height: 220px;
+  overflow-y: auto;
+  font-family: var(--font-mono, 'Courier New', monospace);
+  font-size: 12px;
+  color: var(--text-secondary);
+  line-height: 1.7;
+  margin-bottom: 20px;
+}
+
+.batch-log-entry { padding: 1px 0; }
+.batch-log-entry--error { color: var(--danger); }
+.batch-log-entry--success { color: #34d399; }
+.batch-log-entry--dim { color: var(--text-secondary); opacity: 0.6; }
+
+/* Batch actions */
+.batch-actions {
+  display: flex;
+  gap: 12px;
+  justify-content: center;
+}
+
+.btn-danger {
+  background: var(--danger);
+  color: #fff;
+  border: none;
+}
+.btn-danger:hover { background: #dc2626; }
+
+/* Complete summary */
+.batch-complete {
+  text-align: center;
+  padding: 32px 0 16px;
+}
+
+.batch-complete i {
+  font-size: 48px;
+  color: #34d399;
+  margin-bottom: 12px;
+  display: block;
+}
+
+.batch-complete h2 {
+  font-family: var(--font-heading);
+  font-size: 22px;
+  font-weight: 600;
+  margin: 0 0 8px;
+}
+
+.batch-complete p {
+  font-size: 14px;
+  color: var(--text-secondary);
+  line-height: 1.6;
+  margin-bottom: 20px;
+}
+
+/* =============================================
    RESPONSIVE (basic)
    ============================================= */
 

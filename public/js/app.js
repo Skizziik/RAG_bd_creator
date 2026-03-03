@@ -579,12 +579,15 @@ class App {
             by Tryll Engine<br><br>
             Create a project to start building your knowledge base — one chunk at a time.
           </p>
-          <div style="display:flex;gap:12px;margin-top:8px;">
+          <div style="display:flex;gap:12px;margin-top:8px;flex-wrap:wrap;justify-content:center;">
             <button class="btn btn-accent" id="welcomeNewProject">
               <i class="bi bi-plus-lg"></i> New Project
             </button>
             <button class="btn btn-secondary" id="welcomeImport">
               <i class="bi bi-upload"></i> Import JSON
+            </button>
+            <button class="btn btn-secondary" id="welcomeBatchWiki">
+              <i class="bi bi-globe2"></i> Batch Wiki
             </button>
           </div>
         </div>`;
@@ -592,6 +595,8 @@ class App {
       if (btn) btn.addEventListener('click', () => this._showNewProjectModal());
       const impBtn = $('#welcomeImport');
       if (impBtn) impBtn.addEventListener('click', () => this.els.importFileInput.click());
+      const batchBtn = $('#welcomeBatchWiki');
+      if (batchBtn) batchBtn.addEventListener('click', () => this._showBatchWikiStep1());
       return;
     }
 
@@ -1802,6 +1807,385 @@ class App {
 
   _escAttr(str) {
     return (str || '').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }
+
+  // ---- BATCH WIKI IMPORT ----
+
+  _showBatchWikiStep1() {
+    this.els.modalContent.innerHTML = `
+      <div class="modal-title"><i class="bi bi-globe2"></i> Batch Wiki Import</div>
+      <p class="modal-text">
+        Paste any page URL from a MediaWiki-based wiki — the app will detect the site and fetch all its categories.<br><br>
+        <strong>Supported:</strong> wiki.gg, Fandom, Wikipedia, minecraft.wiki, and any MediaWiki site.
+      </p>
+      <input class="field-input" type="url" id="batchWikiUrl"
+        placeholder="https://terraria.wiki.gg/wiki/Copper_Pickaxe" autofocus>
+      <div id="batchDetectStatus" class="wiki-import-status hidden"></div>
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="modalCancel">Cancel</button>
+        <button class="btn btn-accent" id="batchDetectBtn"><i class="bi bi-search"></i> Fetch Categories</button>
+      </div>`;
+    this.els.modalOverlay.classList.remove('hidden');
+
+    const input = $('#batchWikiUrl');
+    const statusEl = $('#batchDetectStatus');
+    const detectBtn = $('#batchDetectBtn');
+    const cancelBtn = $('#modalCancel');
+
+    setTimeout(() => input.focus(), 100);
+
+    const doDetect = async () => {
+      const url = input.value.trim();
+      if (!url) { input.classList.add('input-error'); return; }
+      input.classList.remove('input-error');
+
+      statusEl.className = 'wiki-import-status';
+      statusEl.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Detecting wiki...';
+
+      detectBtn.disabled = true;
+      try {
+        const result = await api('/wiki/batch/detect', { method: 'POST', body: { url } });
+        this._showBatchWikiStep2(result.apiBase, result.wikiName);
+      } catch (e) {
+        statusEl.className = 'wiki-import-status wiki-import-error';
+        statusEl.textContent = e.message || 'Could not detect a wiki at this URL';
+        detectBtn.disabled = false;
+      }
+    };
+
+    detectBtn.addEventListener('click', doDetect);
+    cancelBtn.addEventListener('click', () => this._closeModal());
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') doDetect();
+      if (e.key === 'Escape') this._closeModal();
+    });
+  }
+
+  async _showBatchWikiStep2(apiBase, wikiName) {
+    this.els.modalContent.innerHTML = `
+      <div class="modal-title"><i class="bi bi-globe2"></i> ${this._esc(wikiName)} — Categories</div>
+      <p class="modal-text"><i class="bi bi-arrow-repeat spin"></i> Loading categories...</p>`;
+    this.els.modalOverlay.querySelector('.modal').classList.add('modal--batch');
+
+    let allCategories;
+    try {
+      const result = await api('/wiki/batch/categories', { method: 'POST', body: { apiBase } });
+      allCategories = result.categories;
+    } catch (e) {
+      this.els.modalContent.innerHTML = `
+        <div class="modal-title"><i class="bi bi-globe2"></i> Error</div>
+        <p class="modal-text wiki-import-error">${this._esc(e.message)}</p>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="modalCancel">Close</button>
+        </div>`;
+      $('#modalCancel').addEventListener('click', () => this._closeModal());
+      return;
+    }
+
+    const accepted = allCategories.filter(c => c.accepted);
+    const rejected = allCategories.filter(c => !c.accepted);
+
+    this.els.modalContent.innerHTML = `
+      <div class="modal-title"><i class="bi bi-globe2"></i> ${this._esc(wikiName)} — Select Categories</div>
+      <input class="batch-category-search" type="text" id="batchCatSearch" placeholder="Search categories...">
+      <div class="batch-category-controls">
+        <button class="btn btn-secondary" id="batchSelectAll">Select All</button>
+        <button class="btn btn-secondary" id="batchDeselectAll">Deselect All</button>
+        <span class="batch-category-count" id="batchCatCount">${accepted.length} of ${allCategories.length} selected</span>
+      </div>
+      <div class="batch-category-scroll" id="batchCatList"></div>
+      <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:6px;">Project name</label>
+      <input class="field-input" type="text" id="batchProjectName" value="${this._escAttr(wikiName)}_knowledge_base" style="margin-bottom:0;">
+      <div class="modal-actions">
+        <button class="btn btn-secondary" id="batchBackBtn"><i class="bi bi-arrow-left"></i> Back</button>
+        <button class="btn btn-accent" id="batchStartBtn"><i class="bi bi-play-fill"></i> Start Import</button>
+      </div>`;
+
+    const listEl = $('#batchCatList');
+    const renderList = (filter = '') => {
+      const lower = filter.toLowerCase();
+      let html = '';
+      const sorted = [...accepted.sort((a, b) => b.size - a.size), ...rejected.sort((a, b) => b.size - a.size)];
+      for (const cat of sorted) {
+        if (lower && !cat.name.toLowerCase().includes(lower)) continue;
+        const cls = cat.accepted ? '' : ' filtered';
+        const checked = cat.accepted ? 'checked' : '';
+        html += `<label class="batch-category-item${cls}">
+          <input type="checkbox" value="${this._escAttr(cat.name)}" ${checked}>
+          <span>${this._esc(cat.name)}</span>
+          <span class="cat-size">${cat.size}</span>
+        </label>`;
+      }
+      listEl.innerHTML = html || '<p style="color:var(--text-secondary);font-size:13px;">No categories found</p>';
+      this._updateBatchCatCount();
+    };
+
+    renderList();
+
+    const searchEl = $('#batchCatSearch');
+    searchEl.addEventListener('input', () => renderList(searchEl.value));
+
+    $('#batchSelectAll').addEventListener('click', () => {
+      listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
+      this._updateBatchCatCount();
+    });
+    $('#batchDeselectAll').addEventListener('click', () => {
+      listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+      this._updateBatchCatCount();
+    });
+    listEl.addEventListener('change', () => this._updateBatchCatCount());
+
+    $('#batchBackBtn').addEventListener('click', () => {
+      this.els.modalOverlay.querySelector('.modal').classList.remove('modal--batch');
+      this._showBatchWikiStep1();
+    });
+
+    $('#batchStartBtn').addEventListener('click', () => {
+      const selected = [...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
+      const projectName = $('#batchProjectName').value.trim() || `${wikiName}_knowledge_base`;
+      if (!selected.length) { this._toast('Select at least one category', 'error'); return; }
+      this._closeModal();
+      this.els.modalOverlay.querySelector('.modal').classList.remove('modal--batch');
+      this._startBatchImport(apiBase, wikiName, selected, projectName);
+    });
+  }
+
+  _updateBatchCatCount() {
+    const listEl = $('#batchCatList');
+    const countEl = $('#batchCatCount');
+    if (!listEl || !countEl) return;
+    const total = listEl.querySelectorAll('input[type="checkbox"]').length;
+    const checked = listEl.querySelectorAll('input[type="checkbox"]:checked').length;
+    countEl.textContent = `${checked} of ${total} selected`;
+  }
+
+  async _startBatchImport(apiBase, wikiName, categories, projectName) {
+    // Render Control Center
+    this.els.content.innerHTML = `
+      <div class="batch-control-center">
+        <div class="batch-header">
+          <i class="bi bi-globe2"></i>
+          <div>
+            <h2>Importing: ${this._esc(wikiName)}</h2>
+            <div class="batch-subtitle">${categories.length} categories selected</div>
+          </div>
+        </div>
+
+        <div class="batch-stats-grid">
+          <div class="batch-stat">
+            <div class="batch-stat-label">Categories</div>
+            <div class="batch-stat-value" id="batchStatCat">0 / ${categories.length}</div>
+            <div class="batch-progress-bar"><div class="batch-progress-fill" id="batchBarCat"></div></div>
+          </div>
+          <div class="batch-stat">
+            <div class="batch-stat-label">Pages</div>
+            <div class="batch-stat-value" id="batchStatPage">0 / ?</div>
+            <div class="batch-progress-bar"><div class="batch-progress-fill" id="batchBarPage"></div></div>
+          </div>
+          <div class="batch-stat">
+            <div class="batch-stat-label">Chunks Created</div>
+            <div class="batch-stat-value" id="batchStatChunks">0</div>
+          </div>
+          <div class="batch-stat">
+            <div class="batch-stat-label">Errors / Skipped</div>
+            <div class="batch-stat-value" id="batchStatErrors">0 / 0</div>
+          </div>
+        </div>
+
+        <div class="batch-current-op" id="batchCurrentOp">
+          <i class="bi bi-arrow-repeat spin"></i> Preparing import...
+        </div>
+
+        <div class="batch-timing">
+          <span id="batchElapsed">0:00</span>
+          <span id="batchEta">ETA: calculating...</span>
+        </div>
+
+        <div class="batch-log" id="batchLog"></div>
+
+        <div class="batch-actions" id="batchActions">
+          <button class="btn btn-danger" id="batchCancelBtn">
+            <i class="bi bi-x-circle"></i> Cancel Import
+          </button>
+        </div>
+      </div>`;
+
+    // Timer
+    const startTime = Date.now();
+    this._batchTimer = setInterval(() => {
+      const el = $('#batchElapsed');
+      if (el) el.textContent = this._formatElapsed(Date.now() - startTime);
+    }, 1000);
+
+    // Cancel
+    this._batchAbort = new AbortController();
+    $('#batchCancelBtn').addEventListener('click', () => {
+      this._batchAbort.abort();
+      this._batchLog('Import cancelled by user', 'error');
+    });
+
+    // SSE stream
+    try {
+      const response = await fetch('/api/wiki/batch/start', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          apiBase, wikiName,
+          categories,
+          session: this.store.sessionCode,
+        }),
+        signal: this._batchAbort.signal,
+      });
+
+      const reader = response.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        const events = buffer.split('\n\n');
+        buffer = events.pop();
+
+        for (const raw of events) {
+          if (!raw.trim()) continue;
+          const lines = raw.split('\n');
+          let eventType = 'message', data = '';
+          for (const line of lines) {
+            if (line.startsWith('event: ')) eventType = line.slice(7);
+            if (line.startsWith('data: ')) data = line.slice(6);
+          }
+          if (data) this._handleBatchEvent(eventType, JSON.parse(data));
+        }
+      }
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        this._batchLog(`Connection error: ${e.message}`, 'error');
+      }
+    }
+
+    clearInterval(this._batchTimer);
+  }
+
+  _handleBatchEvent(type, data) {
+    if (type === 'progress') {
+      const catEl = $('#batchStatCat');
+      const pageEl = $('#batchStatPage');
+      const chunkEl = $('#batchStatChunks');
+      const errEl = $('#batchStatErrors');
+      const catBar = $('#batchBarCat');
+      const pageBar = $('#batchBarPage');
+      const currentOp = $('#batchCurrentOp');
+      const etaEl = $('#batchEta');
+
+      if (catEl) catEl.textContent = `${data.categoriesDone} / ${data.categoriesTotal}`;
+      if (pageEl) pageEl.textContent = `${data.pagesDone} / ${data.pagesTotal}`;
+      if (chunkEl) chunkEl.textContent = data.chunksCreated;
+      if (errEl) errEl.textContent = `${data.errors} / ${data.skipped}`;
+      if (catBar && data.categoriesTotal) catBar.style.width = `${(data.categoriesDone / data.categoriesTotal) * 100}%`;
+      if (pageBar && data.pagesTotal) pageBar.style.width = `${(data.pagesDone / data.pagesTotal) * 100}%`;
+      if (currentOp && data.currentPage) {
+        currentOp.innerHTML = `<i class="bi bi-arrow-repeat spin"></i> Parsing "${this._esc(data.currentPage)}" <span style="opacity:0.5">in ${this._esc(data.currentCategory)}</span>`;
+      }
+      if (etaEl && data.pagesDone > 0 && data.pagesTotal > 0) {
+        const remaining = ((data.elapsed / data.pagesDone) * (data.pagesTotal - data.pagesDone)) / 1000;
+        etaEl.textContent = `ETA: ~${this._formatElapsed(remaining * 1000)} remaining`;
+      }
+      if (data.log) this._batchLog(data.log, 'success');
+    }
+
+    if (type === 'log') {
+      this._batchLog(data.log, data.error ? 'error' : 'dim');
+    }
+
+    if (type === 'status') {
+      this._batchLog(data.log || data.phase, 'dim');
+    }
+
+    if (type === 'category-done') {
+      const catEl = $('#batchStatCat');
+      const catBar = $('#batchBarCat');
+      if (catEl) catEl.textContent = `${data.categoriesDone} / ${data.categoriesTotal}`;
+      if (catBar && data.categoriesTotal) catBar.style.width = `${(data.categoriesDone / data.categoriesTotal) * 100}%`;
+      this._batchLog(`Category "${data.category}" done`, 'success');
+    }
+
+    if (type === 'started') {
+      this._batchProjectName = data.project;
+      this._batchLog(`Project "${data.project}" created`, 'success');
+    }
+
+    if (type === 'complete') {
+      this._batchShowComplete(data);
+    }
+
+    if (type === 'cancelled') {
+      this._batchShowComplete(data, true);
+    }
+
+    if (type === 'error') {
+      this._batchLog(`Fatal error: ${data.message}`, 'error');
+      clearInterval(this._batchTimer);
+    }
+  }
+
+  _batchLog(message, type = '') {
+    const log = $('#batchLog');
+    if (!log) return;
+    const cls = type ? ` batch-log-entry--${type}` : '';
+    const entry = document.createElement('div');
+    entry.className = `batch-log-entry${cls}`;
+    entry.textContent = message;
+    log.appendChild(entry);
+    log.scrollTop = log.scrollHeight;
+  }
+
+  _batchShowComplete(data, cancelled = false) {
+    clearInterval(this._batchTimer);
+
+    const projectName = data.project || this._batchProjectName;
+    const elapsed = this._formatElapsed(data.elapsed || 0);
+
+    const content = $('#batchCurrentOp');
+    const actions = $('#batchActions');
+    const catBar = $('#batchBarCat');
+    const pageBar = $('#batchBarPage');
+
+    if (!cancelled) {
+      if (catBar) catBar.style.width = '100%';
+      if (pageBar) pageBar.style.width = '100%';
+    }
+
+    if (content) {
+      content.innerHTML = cancelled
+        ? '<i class="bi bi-pause-circle" style="color:var(--text-secondary)"></i> Import cancelled'
+        : '<i class="bi bi-check-circle" style="color:#34d399"></i> Import complete!';
+    }
+
+    const summary = `${data.categoriesDone} categories, ${data.pagesDone} pages, ${data.chunksCreated} chunks — ${elapsed}`;
+    this._batchLog(cancelled ? `Cancelled. ${summary}` : `Done! ${summary}`, cancelled ? 'error' : 'success');
+
+    if (actions) {
+      actions.innerHTML = `
+        <button class="btn btn-accent" id="batchOpenProject">
+          <i class="bi bi-folder2-open"></i> Open Project
+        </button>`;
+      $('#batchOpenProject').addEventListener('click', async () => {
+        if (projectName) {
+          await this.store.refreshProjectList();
+          await this.store.selectProject(projectName);
+        }
+      });
+    }
+  }
+
+  _formatElapsed(ms) {
+    const totalSec = Math.floor(ms / 1000);
+    const min = Math.floor(totalSec / 60);
+    const sec = totalSec % 60;
+    return `${min}:${sec.toString().padStart(2, '0')}`;
   }
 }
 
