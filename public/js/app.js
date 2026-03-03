@@ -600,6 +600,7 @@ class App {
     }
 
     if (!this.selected) {
+      this._renderedChunkUid = null;
       if (!this.els.content.querySelector('.empty-state')) {
         this.els.content.innerHTML = `
           <div class="empty-state">
@@ -619,6 +620,13 @@ class App {
       this._renderContent();
       return;
     }
+
+    // Skip re-render if same chunk is already displayed in editor
+    const editor = this.els.content.querySelector('.chunk-editor');
+    if (editor && this._renderedChunkUid === this.selected.chunkUid) {
+      return;
+    }
+    this._renderedChunkUid = this.selected.chunkUid;
 
     const customFieldsHtml = (chunk.customFields || []).map((cf, i) => `
       <div class="custom-field-row">
