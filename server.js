@@ -386,16 +386,9 @@ app.post('/api/report', async (req, res) => {
     const form = new FormData();
     form.append('payload_json', JSON.stringify({ embeds: [embed] }));
 
-    // Attach project JSON if not too large (Discord limit ~8MB)
-    if (project) {
-      try {
-        const projectData = store.exportProject(project);
-        const jsonStr = JSON.stringify(projectData, null, 2);
-        if (jsonStr.length < 7 * 1024 * 1024) {
-          form.append('files[0]', new Blob([jsonStr], { type: 'application/json' }), `${project}.json`);
-        }
-      } catch {}
-    }
+    // Attach reported chunk as JSON file
+    const chunkData = { id: chunkId, text: chunkText, metadata, customFields };
+    form.append('files[0]', new Blob([JSON.stringify(chunkData, null, 2)], { type: 'application/json' }), `${chunkId}.json`);
 
     const dcRes = await fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',

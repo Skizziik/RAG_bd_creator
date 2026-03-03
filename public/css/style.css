@@ -1365,8 +1365,8 @@ body {
   position: fixed;
   bottom: 20px;
   right: 20px;
-  width: 420px;
-  max-height: 80vh;
+  width: 360px;
+  max-height: 55vh;
   background: var(--bg-card);
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
