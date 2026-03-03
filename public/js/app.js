@@ -571,6 +571,7 @@ class App {
     const project = this.store.getCurrentProject();
 
     if (!project) {
+      if (this.els.content.querySelector('.welcome-screen')) return;
       this.els.content.innerHTML = `
         <div class="welcome-screen">
           <div class="welcome-logo"><img src="/img/logo.png" alt="Tryll Engine" class="welcome-logo-img"></div>
@@ -601,14 +602,16 @@ class App {
     }
 
     if (!this.selected) {
-      this.els.content.innerHTML = `
-        <div class="empty-state">
-          <div class="empty-state-icon"><i class="bi bi-box-seam"></i></div>
-          <div class="empty-state-title">Your inventory is empty</div>
-          <p class="empty-state-text">
-            Select a chunk from the sidebar to edit it, or create a new category and add chunks to start building your database.
-          </p>
-        </div>`;
+      if (!this.els.content.querySelector('.empty-state')) {
+        this.els.content.innerHTML = `
+          <div class="empty-state">
+            <div class="empty-state-icon"><i class="bi bi-box-seam"></i></div>
+            <div class="empty-state-title">Your inventory is empty</div>
+            <p class="empty-state-text">
+              Select a chunk from the sidebar to edit it, or create a new category and add chunks to start building your database.
+            </p>
+          </div>`;
+      }
       return;
     }
 
