@@ -1338,6 +1338,14 @@ class App {
           });
         }
 
+        // Save the current (first) chunk immediately
+        const license = ($('#metaLicense') || {}).value || CONFIG.DEFAULT_LICENSE;
+        await this.store.updateChunk(this.selected.categoryId, this.selected.chunkUid, {
+          id: firstChunk.id, text: firstChunk.text,
+          metadata: { page_title: parsed.pageTitle || '', source: parsed.source || '', license },
+          customFields,
+        });
+
         // Create overflow chunks via bulk API
         if (chunks.length > 1) {
           const cat = this.store.currentProject.categories.find(c => c.id === this.selected.categoryId);
@@ -1347,7 +1355,7 @@ class App {
               metadata: {
                 page_title: parsed.pageTitle || '',
                 source: parsed.source || '',
-                license: ($('#metaLicense') || {}).value || CONFIG.DEFAULT_LICENSE,
+                license,
                 ...Object.fromEntries(customFields.map(cf => [cf.key, cf.value])),
               },
             }));
@@ -1355,12 +1363,14 @@ class App {
               method: 'POST',
               body: { chunks: overflowData, session: this.store.sessionCode, source: 'browser' },
             });
-            await this.store._loadProject(this.store.currentProjectName);
-            this.store._notify();
           }
+          await this.store._loadProject(this.store.currentProjectName);
+          this.store._notify();
           this._toast(`Wiki imported! ${chunks.length} chunks created.`, 'success');
         } else {
-          this._toast('Wiki content imported! Review and save.', 'success');
+          await this.store._loadProject(this.store.currentProjectName);
+          this.store._notify();
+          this._toast('Wiki imported!', 'success');
         }
 
         this._closeModal();
