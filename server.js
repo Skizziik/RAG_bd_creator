@@ -392,6 +392,7 @@ app.post('/api/report', async (req, res) => {
 
     const dcRes = await fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
+      headers: { 'User-Agent': 'TryllEngine-DatasetBuilder/1.0' },
       body: form,
     });
     if (!dcRes.ok) {
