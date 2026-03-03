@@ -383,17 +383,13 @@ app.post('/api/report', async (req, res) => {
       timestamp: new Date().toISOString(),
     };
 
-    const form = new FormData();
-    form.append('payload_json', JSON.stringify({ embeds: [embed] }));
-
-    // Attach reported chunk as JSON file
-    const chunkData = { id: chunkId, text: chunkText, metadata, customFields };
-    form.append('files[0]', new Blob([JSON.stringify(chunkData, null, 2)], { type: 'application/json' }), `${chunkId}.json`);
-
     const dcRes = await fetch(DISCORD_WEBHOOK_URL, {
       method: 'POST',
-      headers: { 'User-Agent': 'TryllEngine-DatasetBuilder/1.0' },
-      body: form,
+      headers: {
+        'Content-Type': 'application/json',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36',
+      },
+      body: JSON.stringify({ embeds: [embed] }),
     });
     if (!dcRes.ok) {
       const errBody = await dcRes.text();
