@@ -1083,8 +1083,9 @@ class App {
       const reason = this.els.modalContent.querySelector('input[name="reportReason"]:checked')?.value || 'Other';
       const comment = $('#reportComment')?.value?.trim() || '';
 
-      const project = this.store.currentProject || '';
-      const category = this.selected.categoryId || '';
+      const projectName = this.store.currentProjectName || '';
+      const cat = this.store.getCategories().find(c => c.id === this.selected.categoryId);
+      const categoryName = cat ? cat.name : '';
       const customFields = (chunk.customFields || []).map(f => ({ key: f.key, value: f.value }));
       const chunkText = chunk.text || '';
       const chunkId = chunk.id || '';
@@ -1099,8 +1100,8 @@ class App {
         const { id: reportId } = await idRes.json();
 
         const textTrunc = chunkText.length > 800 ? chunkText.substring(0, 797) + '...' : (chunkText || '\u2014');
-        let desc = `**Project:** ${project || '\u2014'}\n`;
-        desc += `**Category:** ${category || '\u2014'}\n`;
+        let desc = `**Project:** ${projectName || '\u2014'}\n`;
+        desc += `**Category:** ${categoryName || '\u2014'}\n`;
         desc += `**Reason:** ${reason}\n`;
         if (comment) desc += `\n**Comment:**\n${comment}\n`;
         desc += `\n**Text:**\n> ${textTrunc.split('\n').join('\n> ')}\n`;
@@ -1109,17 +1110,24 @@ class App {
           desc += '\n\n' + customFields.map(f => `**${f.key}:** ${f.value}`).join(' | ');
         }
 
+        // Chunk JSON as file attachment
+        const chunkData = { id: chunkId, text: chunkText, metadata: meta, customFields };
+        const chunkBlob = new Blob([JSON.stringify(chunkData, null, 2)], { type: 'application/json' });
+
+        const form = new FormData();
+        form.append('payload_json', JSON.stringify({
+          embeds: [{
+            title: `#${reportId} \u2014 ${chunkId}`.substring(0, 256),
+            color: 0xED4245,
+            description: desc.substring(0, 4096),
+            timestamp: new Date().toISOString(),
+          }],
+        }));
+        form.append('files[0]', chunkBlob, `${chunkId}.json`);
+
         const dcRes = await fetch('https://discord.com/api/webhooks/1478226992934682704/nq5mfqcsgvrQpr6egSQ0ClccY4aUZr2qGSwseOCV4QRd2DyMp81-qfvP4BJrqE_s-lmM', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            embeds: [{
-              title: `#${reportId} \u2014 ${chunkId}`.substring(0, 256),
-              color: 0xED4245,
-              description: desc.substring(0, 4096),
-              timestamp: new Date().toISOString(),
-            }],
-          }),
+          body: form,
         });
         if (!dcRes.ok) throw new Error('Discord error');
         this._closeModal();
