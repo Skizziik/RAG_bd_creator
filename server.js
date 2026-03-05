@@ -299,7 +299,7 @@ app.post('/api/wiki/batch/categories', async (req, res) => {
 });
 
 app.post('/api/wiki/batch/start', async (req, res) => {
-  const { apiBase, wikiName, categories, session } = req.body;
+  const { apiBase, wikiName, categories, session, resume } = req.body;
   if (!apiBase || !categories || !categories.length) {
     return res.status(400).json({ error: 'apiBase and categories are required' });
   }
@@ -330,6 +330,7 @@ app.post('/api/wiki/batch/start', async (req, res) => {
       sessionCode: session,
       sseWriter,
       signal: controller.signal,
+      resume: !!resume,
     });
   } catch (e) {
     if (e.message !== 'aborted') {

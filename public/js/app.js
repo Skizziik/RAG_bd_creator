@@ -2136,11 +2136,15 @@ class App {
     this._batchLastStats = {};
     this._batchProjectName = projectName;
     this._batchPanel = panel;
+    // Save params for resume
+    this._batchParams = { apiBase, wikiName, categories, projectName };
     panel.querySelector('#batchCancelBtn').addEventListener('click', () => {
       this._batchAbort.abort();
     });
 
     // SSE stream
+    const isResume = !!this._batchResuming;
+    this._batchResuming = false;
     try {
       const response = await fetch('/api/wiki/batch/start', {
         method: 'POST',
@@ -2149,6 +2153,7 @@ class App {
           apiBase, wikiName,
           categories,
           session: this.store.sessionCode,
+          resume: isResume,
         }),
         signal: this._batchAbort.signal,
       });
@@ -2182,6 +2187,7 @@ class App {
       } else {
         this._batchLog(`Connection error: ${e.message}`, 'error');
         clearInterval(this._batchTimer);
+        this._batchShowResumeButton();
       }
       return;
     }
@@ -2306,13 +2312,19 @@ class App {
     this._batchLog(cancelled ? `Cancelled. ${summary}` : `Done! ${summary}`, cancelled ? 'error' : 'success');
 
     if (actions) {
+      const resumeBtn = cancelled && this._batchParams
+        ? `<button class="btn btn-accent" id="batchResumeBtn"><i class="bi bi-play-fill"></i> Resume</button>`
+        : '';
       actions.innerHTML = `
+        ${resumeBtn}
         <button class="btn btn-accent" id="batchOpenProject">
           <i class="bi bi-folder2-open"></i> Open Project
         </button>
         <button class="btn btn-secondary" id="batchClosePanel">
           <i class="bi bi-x-lg"></i> Close
         </button>`;
+      const resumeEl = panel.querySelector('#batchResumeBtn');
+      if (resumeEl) resumeEl.addEventListener('click', () => this._batchResume());
       panel.querySelector('#batchOpenProject').addEventListener('click', async () => {
         if (projectName) {
           await this.store.refreshProjectList();
@@ -2326,6 +2338,28 @@ class App {
         this._batchPanel = null;
       });
     }
+  }
+
+  _batchShowResumeButton() {
+    const panel = this._batchPanel;
+    if (!panel || !this._batchParams) return;
+    const actions = panel.querySelector('#batchActions');
+    if (!actions) return;
+    actions.innerHTML = `
+      <button class="btn btn-accent" id="batchResumeBtn"><i class="bi bi-play-fill"></i> Resume</button>
+      <button class="btn btn-secondary" id="batchClosePanel"><i class="bi bi-x-lg"></i> Close</button>`;
+    panel.querySelector('#batchResumeBtn').addEventListener('click', () => this._batchResume());
+    panel.querySelector('#batchClosePanel').addEventListener('click', () => {
+      panel.remove();
+      this._batchPanel = null;
+    });
+  }
+
+  _batchResume() {
+    const p = this._batchParams;
+    if (!p) return;
+    this._batchResuming = true;
+    this._startBatchImport(p.apiBase, p.wikiName, p.categories, p.projectName);
   }
 
   _formatElapsed(ms) {
