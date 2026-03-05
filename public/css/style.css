@@ -1523,8 +1523,14 @@ body {
 /* Batch actions */
 .batch-actions {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  gap: 8px;
   justify-content: center;
+}
+.batch-actions .btn {
+  font-size: 13px;
+  padding: 6px 14px;
+  white-space: nowrap;
 }
 
 .btn-danger {
