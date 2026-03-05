@@ -602,6 +602,7 @@ class App {
     if (!this.selected) {
       this._renderedChunkUid = null;
       if (!this.els.content.querySelector('.empty-state')) {
+        const hasBatch = !!project.batchMeta;
         this.els.content.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-icon"><i class="bi bi-box-seam"></i></div>
@@ -609,7 +610,11 @@ class App {
             <p class="empty-state-text">
               Select a chunk from the sidebar to edit it, or create a new category and add chunks to start building your database.
             </p>
+            ${hasBatch ? `<button class="btn btn-accent" id="resumeBatchBtn" style="margin-top:12px"><i class="bi bi-play-fill"></i> Resume Wiki Import</button>` : ''}
           </div>`;
+        if (hasBatch) {
+          this.els.content.querySelector('#resumeBatchBtn').addEventListener('click', () => this._resumeBatchFromProject());
+        }
       }
       return;
     }
@@ -2360,6 +2365,20 @@ class App {
     if (!p) return;
     this._batchResuming = true;
     this._startBatchImport(p.apiBase, p.wikiName, p.categories, p.projectName);
+  }
+
+  async _resumeBatchFromProject() {
+    const projectName = this.store.currentProjectName;
+    if (!projectName) return;
+    try {
+      const res = await fetch(`/api/wiki/batch/resume/${encodeURIComponent(projectName)}`);
+      if (!res.ok) { this._toast('No batch data found for this project', 'error'); return; }
+      const { apiBase, wikiName, categories } = await res.json();
+      this._batchResuming = true;
+      this._startBatchImport(apiBase, wikiName, categories, projectName);
+    } catch (e) {
+      this._toast(`Resume failed: ${e.message}`, 'error');
+    }
   }
 
   _formatElapsed(ms) {

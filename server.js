@@ -340,6 +340,17 @@ app.post('/api/wiki/batch/start', async (req, res) => {
   res.end();
 });
 
+// ---- BATCH RESUME (get saved batch params from project) ----
+app.get('/api/wiki/batch/resume/:project', (req, res) => {
+  try {
+    const data = store.getProject(req.params.project);
+    if (!data.batchMeta) return res.status(404).json({ error: 'No batch metadata found for this project' });
+    res.json(data.batchMeta);
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
 // ---- CHUNK REPORT (ID generator) ----
 const REPORT_COUNTER_FILE = path.join(__dirname, 'data', 'report-counter.json');
 
