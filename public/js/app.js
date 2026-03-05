@@ -415,6 +415,7 @@ class App {
       historyDrawer: $('#historyDrawer'),
       historyCloseBtn: $('#historyCloseBtn'),
       historyList: $('#historyList'),
+      resumeBatchTopBtn: $('#resumeBatchTopBtn'),
     };
   }
 
@@ -428,6 +429,7 @@ class App {
     this.els.importProjectBtn.addEventListener('click', () => this.els.importFileInput.click());
     this.els.importFileInput.addEventListener('change', (e) => this._handleImport(e));
     this.els.deleteProjectBtn.addEventListener('click', () => this._handleDeleteProject());
+    this.els.resumeBatchTopBtn.addEventListener('click', () => this._resumeBatchFromProject());
 
     this.els.addCategoryBtn.addEventListener('click', () => this._showCategoryInput());
     this.els.confirmCategoryBtn.addEventListener('click', () => this._confirmCategory());
@@ -468,6 +470,9 @@ class App {
     this._renderCategories();
     this._renderContent();
     this._renderMcpStatus();
+    // Show/hide Resume batch button in topbar
+    const project = this.store.getCurrentProject();
+    this.els.resumeBatchTopBtn.classList.toggle('hidden', !project?.batchMeta);
     if (this._onboardingStep !== null) {
       setTimeout(() => this._showOnboardingStep(), 50);
     }
