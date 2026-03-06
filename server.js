@@ -7,12 +7,14 @@ const { WebSocketServer } = require('ws');
 const { Store } = require('./lib/store');
 const { parseUrl } = require('./lib/wiki');
 const { detectWikiFromUrl, fetchAllCategories, filterCategories, runBatchImport } = require('./lib/wiki-batch');
+const { getLocalCategories, ingestLocalWiki, prepareLocalWiki, runLocalDatasetBuild } = require('./lib/wiki-local');
 
 const app = express();
 const server = http.createServer(app);
 const PORT = process.env.PORT || 3000;
 
 const store = new Store(path.join(__dirname, 'data'));
+const wikiCacheRoot = path.join(__dirname, 'data', 'wiki-cache');
 
 // ---- MIDDLEWARE ----
 app.use(express.json({ limit: '10mb' }));
@@ -351,6 +353,95 @@ app.get('/api/wiki/batch/resume/:project', (req, res) => {
   }
 });
 
+
+// ---- LOCAL WIKI CACHE ----
+app.post('/api/wiki/local/prepare', async (req, res) => {
+  try {
+    const { url } = req.body;
+    if (!url) return res.status(400).json({ error: 'URL is required' });
+    try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
+    const result = await prepareLocalWiki(wikiCacheRoot, url);
+    res.json(result);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.post('/api/wiki/local/materialize', async (req, res) => {
+  const { url } = req.body;
+  if (!url) return res.status(400).json({ error: 'URL is required' });
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const sseWriter = {
+    write(event, data) { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); },
+    end() { res.end(); },
+  };
+
+  const controller = new AbortController();
+  res.on('close', () => controller.abort());
+
+  try {
+    const manifest = await ingestLocalWiki(wikiCacheRoot, url, sseWriter, controller.signal);
+    sseWriter.write('complete', { wiki: manifest, project: manifest.wikiId });
+  } catch (e) {
+    if (e.message !== 'aborted') sseWriter.write('error', { message: e.message });
+  }
+  res.end();
+});
+
+app.get('/api/wiki/local/categories/:wikiId', async (req, res) => {
+  try {
+    const result = await getLocalCategories(wikiCacheRoot, req.params.wikiId);
+    res.json(result);
+  } catch (e) {
+    res.status(404).json({ error: e.message });
+  }
+});
+
+app.post('/api/wiki/local/build/start', async (req, res) => {
+  const { wikiId, categories, projectName, session, resume } = req.body;
+  if (!wikiId) return res.status(400).json({ error: 'wikiId is required' });
+
+  res.writeHead(200, {
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+
+  const sseWriter = {
+    write(event, data) { res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`); },
+    end() { res.end(); },
+  };
+
+  const controller = new AbortController();
+  res.on('close', () => controller.abort());
+
+  try {
+    await runLocalDatasetBuild({
+      cacheRoot: wikiCacheRoot,
+      wikiId,
+      categories: categories || [],
+      projectName: projectName || `${wikiId}_knowledge_base`,
+      store,
+      broadcastFn: broadcastToBrowsers,
+      sessionCode: session,
+      sseWriter,
+      signal: controller.signal,
+      resume: !!resume,
+    });
+  } catch (e) {
+    if (e.message !== 'aborted') sseWriter.write('error', { message: e.message });
+  }
+  res.end();
+});
+
 // ---- CHUNK REPORT (ID generator) ----
 const REPORT_COUNTER_FILE = path.join(__dirname, 'data', 'report-counter.json');
 
@@ -435,3 +526,6 @@ setInterval(() => {
 server.listen(PORT, () => {
   console.log(`Dataset Builder by Tryll Engine — running on port ${PORT}`);
 });
+
+
+

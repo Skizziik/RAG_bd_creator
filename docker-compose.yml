@@ -1,0 +1,13 @@
+services:
+  jsoncreator:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: jsoncreator-local
+    ports:
+      - "3000:3000"
+    environment:
+      PORT: 3000
+    volumes:
+      - ./data:/app/data
+    restart: unless-stopped

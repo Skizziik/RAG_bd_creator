@@ -336,3 +336,32 @@ See [MCP server docs](https://github.com/Skizziik/tryll_dataset_builder) for the
 ## License
 
 MIT
+
+---
+
+## Docker Quick Start
+
+```bash
+docker compose up --build
+```
+
+Then open `http://localhost:3000`.
+
+Persistent data is stored in `./data`, including:
+
+- project JSON files
+- version history
+- local wiki caches (`data/wiki-cache/<wiki-id>`)
+- downloaded dumps and local page snapshots
+
+### Local Wiki Build Flow
+
+1. Open the app in the browser.
+2. Click `Batch Wiki`.
+3. Paste a page URL from the target wiki.
+4. The app will detect the wiki and build a local cache.
+5. Select categories from the local cache.
+6. Start dataset build.
+
+For Wikimedia wikis, the app prefers XML dumps.
+For other MediaWiki-style wikis, it falls back to a full local snapshot via the MediaWiki API.

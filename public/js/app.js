@@ -472,7 +472,7 @@ class App {
     this._renderMcpStatus();
     // Show/hide Resume batch button in topbar
     const project = this.store.getCurrentProject();
-    this.els.resumeBatchTopBtn.classList.toggle('hidden', !project?.batchMeta);
+    this.els.resumeBatchTopBtn.classList.toggle('hidden', !(project?.batchMeta || project?.localWikiMeta));
     if (this._onboardingStep !== null) {
       setTimeout(() => this._showOnboardingStep(), 50);
     }
@@ -607,7 +607,7 @@ class App {
     if (!this.selected) {
       this._renderedChunkUid = null;
       if (!this.els.content.querySelector('.empty-state')) {
-        const hasBatch = !!project.batchMeta;
+        const hasBatch = !!(project.batchMeta || project.localWikiMeta);
         this.els.content.innerHTML = `
           <div class="empty-state">
             <div class="empty-state-icon"><i class="bi bi-box-seam"></i></div>
@@ -1916,17 +1916,16 @@ class App {
 
   _showBatchWikiStep1() {
     this.els.modalContent.innerHTML = `
-      <div class="modal-title"><i class="bi bi-globe2"></i> Batch Wiki Import</div>
+      <div class="modal-title"><i class="bi bi-globe2"></i> Local Wiki Build</div>
       <p class="modal-text">
-        Paste any page URL from a MediaWiki-based wiki — the app will detect the site and fetch all its categories.<br><br>
-        <strong>Supported:</strong> wiki.gg, Fandom, Wikipedia, minecraft.wiki, and any MediaWiki site.
+        Paste any page URL from a wiki. The app will detect the wiki, build a local cache, then let you build a dataset entirely from local data.
       </p>
       <input class="field-input" type="url" id="batchWikiUrl"
         placeholder="https://terraria.wiki.gg/wiki/Copper_Pickaxe" autofocus>
       <div id="batchDetectStatus" class="wiki-import-status hidden"></div>
       <div class="modal-actions">
         <button class="btn btn-secondary" id="modalCancel">Cancel</button>
-        <button class="btn btn-accent" id="batchDetectBtn"><i class="bi bi-search"></i> Fetch Categories</button>
+        <button class="btn btn-accent" id="batchDetectBtn"><i class="bi bi-hdd-network"></i> Prepare Local Wiki</button>
       </div>`;
     this.els.modalOverlay.classList.remove('hidden');
 
@@ -1944,15 +1943,24 @@ class App {
 
       statusEl.className = 'wiki-import-status';
       statusEl.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Detecting wiki...';
-
       detectBtn.disabled = true;
+
       try {
-        const result = await api('/wiki/batch/detect', { method: 'POST', body: { url } });
-        this._showBatchWikiStep2(result.apiBase, result.wikiName);
+        const result = await api('/wiki/local/prepare', { method: 'POST', body: { url } });
+        const wiki = result.wiki;
+        if (result.ready) {
+          statusEl.innerHTML = `<i class="bi bi-check-circle"></i> Local cache already exists for <strong>${this._esc(wiki.wikiName)}</strong>.`;
+          this._showBatchWikiStep2(wiki);
+          return;
+        }
+
+        statusEl.innerHTML = `<i class="bi bi-arrow-repeat spin"></i> Building local cache for <strong>${this._esc(wiki.wikiName)}</strong> via ${this._esc(wiki.acquisition.label)}...`;
+        await this._materializeLocalWiki(wiki, url, statusEl, detectBtn);
       } catch (e) {
         statusEl.className = 'wiki-import-status wiki-import-error';
-        statusEl.textContent = e.message || 'Could not detect a wiki at this URL';
+        statusEl.textContent = e.message || 'Could not prepare a local wiki from this URL';
         detectBtn.disabled = false;
+        detectBtn.innerHTML = '<i class="bi bi-hdd-network"></i> Prepare Local Wiki';
       }
     };
 
@@ -1964,15 +1972,88 @@ class App {
     });
   }
 
-  async _showBatchWikiStep2(apiBase, wikiName) {
+  async _materializeLocalWiki(wiki, url, statusEl, detectBtn) {
+    detectBtn.disabled = true;
+    detectBtn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Building Cache...';
+
+    const response = await fetch('/api/wiki/local/materialize', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ url }),
+    });
+
+    let readyWiki = null;
+    await this._consumeSseStream(response, (type, data) => {
+      if (type === 'status') {
+        statusEl.className = 'wiki-import-status';
+        statusEl.innerHTML = `<i class="bi bi-arrow-repeat spin"></i> ${this._esc(data.log || data.phase || 'Working...')}`;
+      }
+      if (type === 'progress') {
+        const msg = data.log || `Cached ${data.pagesDone || 0} pages locally...`;
+        statusEl.className = 'wiki-import-status';
+        statusEl.innerHTML = `<i class="bi bi-arrow-repeat spin"></i> ${this._esc(msg)}`;
+      }
+      if (type === 'error') {
+        throw new Error(data.message || 'Local cache build failed');
+      }
+      if (type === 'complete' && data.wiki) {
+        readyWiki = data.wiki;
+      }
+    });
+
+    detectBtn.disabled = false;
+    detectBtn.innerHTML = '<i class="bi bi-hdd-network"></i> Prepare Local Wiki';
+
+    if (!readyWiki) throw new Error('Local cache build did not finish correctly');
+    this._showBatchWikiStep2(readyWiki);
+  }
+
+  async _consumeSseStream(response, onEvent) {
+    if (!response.ok) {
+      let message = 'Request failed';
+      try {
+        const json = await response.json();
+        message = json.error || message;
+      } catch {}
+      throw new Error(message);
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+
+      const events = buffer.split('\n\n');
+      buffer = events.pop();
+
+      for (const raw of events) {
+        if (!raw.trim()) continue;
+        const lines = raw.split('\n');
+        let eventType = 'message';
+        let data = '';
+        for (const line of lines) {
+          if (line.startsWith('event: ')) eventType = line.slice(7);
+          if (line.startsWith('data: ')) data = line.slice(6);
+        }
+        if (!data) continue;
+        onEvent(eventType, JSON.parse(data));
+      }
+    }
+  }
+
+  async _showBatchWikiStep2(wiki) {
     this.els.modalContent.innerHTML = `
-      <div class="modal-title"><i class="bi bi-globe2"></i> ${this._esc(wikiName)} — Categories</div>
-      <p class="modal-text"><i class="bi bi-arrow-repeat spin"></i> Loading categories...</p>`;
+      <div class="modal-title"><i class="bi bi-globe2"></i> ${this._esc(wiki.wikiName)} - Local Categories</div>
+      <p class="modal-text"><i class="bi bi-arrow-repeat spin"></i> Loading categories from local cache...</p>`;
     this.els.modalOverlay.querySelector('.modal').classList.add('modal--batch');
 
     let allCategories;
     try {
-      const result = await api('/wiki/batch/categories', { method: 'POST', body: { apiBase } });
+      const result = await api(`/wiki/local/categories/${encodeURIComponent(wiki.wikiId)}`);
       allCategories = result.categories;
     } catch (e) {
       this.els.modalContent.innerHTML = `
@@ -1989,7 +2070,8 @@ class App {
     const rejected = allCategories.filter(c => !c.accepted);
 
     this.els.modalContent.innerHTML = `
-      <div class="modal-title"><i class="bi bi-globe2"></i> ${this._esc(wikiName)} — Select Categories</div>
+      <div class="modal-title"><i class="bi bi-globe2"></i> ${this._esc(wiki.wikiName)} - Select Categories</div>
+      <p class="modal-text">The wiki is cached locally. Select the categories you want to include in the dataset build.</p>
       <input class="batch-category-search" type="text" id="batchCatSearch" placeholder="Search categories...">
       <div class="batch-category-controls">
         <button class="btn btn-secondary" id="batchSelectAll">Select All</button>
@@ -1998,17 +2080,17 @@ class App {
       </div>
       <div class="batch-category-scroll" id="batchCatList"></div>
       <label style="display:block;font-size:13px;color:var(--text-secondary);margin-bottom:6px;">Project name</label>
-      <input class="field-input" type="text" id="batchProjectName" value="${this._escAttr(wikiName)}_knowledge_base" style="margin-bottom:0;">
+      <input class="field-input" type="text" id="batchProjectName" value="${this._escAttr(wiki.wikiName)}_knowledge_base" style="margin-bottom:0;">
       <div class="modal-actions">
         <button class="btn btn-secondary" id="batchBackBtn"><i class="bi bi-arrow-left"></i> Back</button>
-        <button class="btn btn-accent" id="batchStartBtn"><i class="bi bi-play-fill"></i> Start Import</button>
+        <button class="btn btn-accent" id="batchStartBtn"><i class="bi bi-play-fill"></i> Build Dataset</button>
       </div>`;
 
     const listEl = $('#batchCatList');
     const renderList = (filter = '') => {
       const lower = filter.toLowerCase();
       let html = '';
-      const sorted = [...accepted.sort((a, b) => b.size - a.size), ...rejected.sort((a, b) => b.size - a.size)];
+      const sorted = [...accepted].sort((a, b) => b.count - a.count).concat([...rejected].sort((a, b) => b.count - a.count));
       for (const cat of sorted) {
         if (lower && !cat.name.toLowerCase().includes(lower)) continue;
         const cls = cat.accepted ? '' : ' filtered';
@@ -2016,7 +2098,7 @@ class App {
         html += `<label class="batch-category-item${cls}">
           <input type="checkbox" value="${this._escAttr(cat.name)}" ${checked}>
           <span>${this._esc(cat.name)}</span>
-          <span class="cat-size">${cat.size}</span>
+          <span class="cat-size">${cat.count}</span>
         </label>`;
       }
       listEl.innerHTML = html || '<p style="color:var(--text-secondary);font-size:13px;">No categories found</p>';
@@ -2027,7 +2109,6 @@ class App {
 
     const searchEl = $('#batchCatSearch');
     searchEl.addEventListener('input', () => renderList(searchEl.value));
-
     $('#batchSelectAll').addEventListener('click', () => {
       listEl.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = true);
       this._updateBatchCatCount();
@@ -2045,11 +2126,11 @@ class App {
 
     $('#batchStartBtn').addEventListener('click', () => {
       const selected = [...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
-      const projectName = $('#batchProjectName').value.trim() || `${wikiName}_knowledge_base`;
+      const projectName = $('#batchProjectName').value.trim() || `${wiki.wikiName}_knowledge_base`;
       if (!selected.length) { this._toast('Select at least one category', 'error'); return; }
       this._closeModal();
       this.els.modalOverlay.querySelector('.modal').classList.remove('modal--batch');
-      this._startBatchImport(apiBase, wikiName, selected, projectName);
+      this._startBatchImport(wiki, selected, projectName);
     });
   }
 
@@ -2062,20 +2143,18 @@ class App {
     countEl.textContent = `${checked} of ${total} selected`;
   }
 
-  async _startBatchImport(apiBase, wikiName, categories, projectName) {
-    // Remove any existing panel
+  async _startBatchImport(wiki, categories, projectName) {
     const old = document.querySelector('.batch-panel');
     if (old) old.remove();
 
-    // Create floating panel
     const panel = document.createElement('div');
     panel.className = 'batch-panel';
     panel.innerHTML = `
       <div class="batch-panel-header" id="batchPanelHeader">
         <i class="bi bi-globe2"></i>
         <div class="batch-panel-title">
-          Importing: ${this._esc(wikiName)}
-          <small>${categories.length} cat</small>
+          Building: ${this._esc(wiki.wikiName)}
+          <small>${categories.length} categories</small>
         </div>
         <button class="batch-panel-toggle" id="batchToggle" title="Collapse"><i class="bi bi-dash-lg"></i></button>
       </div>
@@ -2102,7 +2181,7 @@ class App {
         </div>
 
         <div class="batch-current-op" id="batchCurrentOp">
-          <i class="bi bi-arrow-repeat spin"></i> Preparing import...
+          <i class="bi bi-arrow-repeat spin"></i> Preparing local build...
         </div>
 
         <div class="batch-timing">
@@ -2120,7 +2199,6 @@ class App {
       </div>`;
     document.body.appendChild(panel);
 
-    // Toggle collapse
     panel.querySelector('#batchToggle').addEventListener('click', (e) => {
       e.stopPropagation();
       panel.classList.toggle('batch-panel--collapsed');
@@ -2134,63 +2212,38 @@ class App {
       }
     });
 
-    // Timer
-    const startTime = Date.now();
+    this._batchStartedAt = Date.now();
     this._batchTimer = setInterval(() => {
       const el = panel.querySelector('#batchElapsed');
-      if (el) el.textContent = this._formatElapsed(Date.now() - startTime);
+      if (el) el.textContent = this._formatElapsed(Date.now() - this._batchStartedAt);
     }, 1000);
 
-    // Cancel
     this._batchAbort = new AbortController();
     this._batchLastStats = {};
     this._batchProjectName = projectName;
     this._batchPanel = panel;
-    // Save params for resume
-    this._batchParams = { apiBase, wikiName, categories, projectName };
-    panel.querySelector('#batchCancelBtn').addEventListener('click', () => {
-      this._batchAbort.abort();
-    });
+    this._batchParams = { wikiId: wiki.wikiId, wikiName: wiki.wikiName, categories, projectName };
 
-    // SSE stream
+    panel.querySelector('#batchCancelBtn').addEventListener('click', () => this._batchAbort.abort());
+
     const isResume = !!this._batchResuming;
     this._batchResuming = false;
+
     try {
-      const response = await fetch('/api/wiki/batch/start', {
+      const response = await fetch('/api/wiki/local/build/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          apiBase, wikiName,
+          wikiId: wiki.wikiId,
           categories,
+          projectName,
           session: this.store.sessionCode,
           resume: isResume,
         }),
         signal: this._batchAbort.signal,
       });
 
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-
-        const events = buffer.split('\n\n');
-        buffer = events.pop();
-
-        for (const raw of events) {
-          if (!raw.trim()) continue;
-          const lines = raw.split('\n');
-          let eventType = 'message', data = '';
-          for (const line of lines) {
-            if (line.startsWith('event: ')) eventType = line.slice(7);
-            if (line.startsWith('data: ')) data = line.slice(6);
-          }
-          if (data) this._handleBatchEvent(eventType, JSON.parse(data));
-        }
-      }
+      await this._consumeSseStream(response, (type, data) => this._handleBatchEvent(type, data));
     } catch (e) {
       if (e.name === 'AbortError') {
         this._batchShowComplete({ ...this._batchLastStats, project: this._batchProjectName }, true);
@@ -2209,9 +2262,10 @@ class App {
     const panel = this._batchPanel;
     if (!panel) return;
 
-    if (type === 'progress' || type === 'category-done' || type === 'status') {
-      this._batchLastStats = data;
+    if (type === 'progress' || type === 'category-done' || type === 'status' || type === 'started') {
+      this._batchLastStats = { ...this._batchLastStats, ...data };
     }
+
     if (type === 'progress') {
       const catEl = panel.querySelector('#batchStatCat');
       const pageEl = panel.querySelector('#batchStatPage');
@@ -2221,54 +2275,35 @@ class App {
       const pageBar = panel.querySelector('#batchBarPage');
       const currentOp = panel.querySelector('#batchCurrentOp');
       const etaEl = panel.querySelector('#batchEta');
+      const elapsed = Date.now() - (this._batchStartedAt || Date.now());
 
-      if (catEl) catEl.textContent = `${data.categoriesDone} / ${data.categoriesTotal}`;
-      if (pageEl) pageEl.textContent = `${data.pagesDone} / ${data.pagesTotal}`;
-      if (chunkEl) chunkEl.textContent = data.chunksCreated;
-      if (errEl) errEl.textContent = `${data.errors} / ${data.skipped}`;
-      if (catBar && data.categoriesTotal) catBar.style.width = `${(data.categoriesDone / data.categoriesTotal) * 100}%`;
-      if (pageBar && data.pagesTotal) pageBar.style.width = `${(data.pagesDone / data.pagesTotal) * 100}%`;
+      if (catEl) catEl.textContent = `${data.categoriesDone || 0} / ${data.categoriesTotal || 0}`;
+      if (pageEl) pageEl.textContent = `${data.pagesDone || 0} / ${data.pagesTotal || '?'}`;
+      if (chunkEl) chunkEl.textContent = data.chunksCreated || 0;
+      if (errEl) errEl.textContent = `${data.errors || 0} / ${data.skipped || 0}`;
+      if (catBar && data.categoriesTotal) catBar.style.width = `${((data.categoriesDone || 0) / data.categoriesTotal) * 100}%`;
+      if (pageBar && data.pagesTotal) pageBar.style.width = `${((data.pagesDone || 0) / data.pagesTotal) * 100}%`;
       if (currentOp && data.currentPage) {
-        currentOp.innerHTML = `<i class="bi bi-arrow-repeat spin"></i> Parsing "${this._esc(data.currentPage)}" <span style="opacity:0.5">in ${this._esc(data.currentCategory)}</span>`;
+        currentOp.innerHTML = `<i class="bi bi-arrow-repeat spin"></i> Building from "${this._esc(data.currentPage)}" <span style="opacity:0.5">in ${this._esc(data.currentCategory || 'local cache')}</span>`;
       }
       if (etaEl && data.pagesDone > 0 && data.pagesTotal > 0) {
-        const remaining = ((data.elapsed / data.pagesDone) * (data.pagesTotal - data.pagesDone)) / 1000;
+        const remaining = ((elapsed / data.pagesDone) * (data.pagesTotal - data.pagesDone)) / 1000;
         etaEl.textContent = `ETA: ~${this._formatElapsed(remaining * 1000)} remaining`;
       }
       if (data.log) this._batchLog(data.log, 'success');
     }
 
-    if (type === 'log') {
-      this._batchLog(data.log, data.error ? 'error' : 'dim');
-    }
-
-    if (type === 'status') {
-      this._batchLog(data.log || data.phase, 'dim');
-    }
-
-    if (type === 'category-done') {
-      const catEl = panel.querySelector('#batchStatCat');
-      const catBar = panel.querySelector('#batchBarCat');
-      if (catEl) catEl.textContent = `${data.categoriesDone} / ${data.categoriesTotal}`;
-      if (catBar && data.categoriesTotal) catBar.style.width = `${(data.categoriesDone / data.categoriesTotal) * 100}%`;
-      this._batchLog(`Category "${data.category}" done`, 'success');
-    }
+    if (type === 'log') this._batchLog(data.log, data.error ? 'error' : 'dim');
+    if (type === 'status') this._batchLog(data.log || data.phase, 'dim');
 
     if (type === 'started') {
       this._batchProjectName = data.project;
       this._batchLog(`Project "${data.project}" created`, 'success');
-      // Load project in sidebar so it appears immediately
       this.store.refreshProjectList().then(() => this.store.selectProject(data.project));
     }
 
-    if (type === 'complete') {
-      this._batchShowComplete(data);
-    }
-
-    if (type === 'cancelled') {
-      this._batchShowComplete(data, true);
-    }
-
+    if (type === 'complete') this._batchShowComplete(data);
+    if (type === 'cancelled') this._batchShowComplete(data, true);
     if (type === 'error') {
       this._batchLog(`Fatal error: ${data.message}`, 'error');
       clearInterval(this._batchTimer);
@@ -2294,10 +2329,8 @@ class App {
     if (!panel) return;
 
     const projectName = data.project || this._batchProjectName;
-    const elapsed = this._formatElapsed(data.elapsed || 0);
-
+    const elapsed = this._formatElapsed(Date.now() - (this._batchStartedAt || Date.now()));
     panel.classList.add(cancelled ? 'batch-panel--cancelled' : 'batch-panel--done');
-    // Expand if collapsed so user sees the result
     panel.classList.remove('batch-panel--collapsed');
     const toggleIcon = panel.querySelector('#batchToggle i');
     if (toggleIcon) toggleIcon.className = 'bi bi-dash-lg';
@@ -2314,11 +2347,11 @@ class App {
 
     if (currentOp) {
       currentOp.innerHTML = cancelled
-        ? '<i class="bi bi-pause-circle" style="color:var(--text-secondary)"></i> Import cancelled'
-        : '<i class="bi bi-check-circle" style="color:#34d399"></i> Import complete!';
+        ? '<i class="bi bi-pause-circle" style="color:var(--text-secondary)"></i> Build cancelled'
+        : '<i class="bi bi-check-circle" style="color:#34d399"></i> Local build complete!';
     }
 
-    const summary = `${data.categoriesDone || 0} categories, ${data.pagesDone || 0} pages, ${data.chunksCreated || 0} chunks — ${elapsed}`;
+    const summary = `${data.categoriesDone || 0} categories, ${data.pagesDone || 0} pages, ${data.chunksCreated || 0} chunks - ${elapsed}`;
     this._batchLog(cancelled ? `Cancelled. ${summary}` : `Done! ${summary}`, cancelled ? 'error' : 'success');
 
     if (actions) {
@@ -2369,18 +2402,30 @@ class App {
     const p = this._batchParams;
     if (!p) return;
     this._batchResuming = true;
-    this._startBatchImport(p.apiBase, p.wikiName, p.categories, p.projectName);
+    this._startBatchImport({ wikiId: p.wikiId, wikiName: p.wikiName }, p.categories, p.projectName);
   }
 
   async _resumeBatchFromProject() {
+    const project = this.store.getCurrentProject();
     const projectName = this.store.currentProjectName;
-    if (!projectName) return;
+    if (!projectName || !project) return;
+
+    const localMeta = project.localWikiMeta;
+    if (localMeta) {
+      this._batchResuming = true;
+      this._startBatchImport({
+        wikiId: localMeta.wikiId,
+        wikiName: localMeta.wikiName || localMeta.wikiId,
+      }, localMeta.selectedCategories || [], projectName);
+      return;
+    }
+
     try {
       const res = await fetch(`/api/wiki/batch/resume/${encodeURIComponent(projectName)}`);
       if (!res.ok) { this._toast('No batch data found for this project', 'error'); return; }
       const { apiBase, wikiName, categories } = await res.json();
       this._batchResuming = true;
-      this._startBatchImport(apiBase, wikiName, categories, projectName);
+      this._startBatchImport({ wikiId: apiBase, wikiName }, categories, projectName);
     } catch (e) {
       this._toast(`Resume failed: ${e.message}`, 'error');
     }
@@ -2400,3 +2445,5 @@ class App {
 document.addEventListener('DOMContentLoaded', () => {
   window.app = new App();
 });
+
+
