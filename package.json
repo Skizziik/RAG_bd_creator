@@ -6,7 +6,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "test": "node test/wiki-wikitext.test.js"
+    "test": "node test/wiki-wikitext.test.js && node test/wiki-html.test.js"
   },
   "dependencies": {
     "cheerio": "^1.2.0",

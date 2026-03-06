@@ -2351,8 +2351,19 @@ class App {
         : '<i class="bi bi-check-circle" style="color:#34d399"></i> Local build complete!';
     }
 
+
     const summary = `${data.categoriesDone || 0} categories, ${data.pagesDone || 0} pages, ${data.chunksCreated || 0} chunks - ${elapsed}`;
     this._batchLog(cancelled ? `Cancelled. ${summary}` : `Done! ${summary}`, cancelled ? 'error' : 'success');
+
+    if (!cancelled && projectName) {
+      (async () => {
+        try {
+          await this.store.refreshProjectList();
+          await this.store.selectProject(projectName);
+          this.render();
+        } catch {}
+      })();
+    }
 
     if (actions) {
       const resumeBtn = cancelled && this._batchParams
