@@ -114,6 +114,13 @@ trivia=
 }}`,
 };
 
+const positionalInfoboxPage = {
+  title: 'Carbuncle Hat',
+  wikitext: `{{EquipmentInfobox|Multi}}
+
+'''Carbuncle Hat''' is a helm item.`,
+};
+
 const result = buildChunksFromExtractedPage(page, { limit: 120 });
 assert.equal(result.pageTitle, 'Copper Pickaxe');
 assert.equal(result.infobox.damage, '4');
@@ -156,5 +163,8 @@ assert.match(genericResult.text, /Common During Daytime -> Verdant \(40%\)/i);
 assert.match(genericResult.text, /## Attributes/i);
 assert.match(genericResult.text, /Species: Forest/i);
 assert.ok(genericResult.chunks.length >= 1);
+
+const positionalInfoboxResult = buildChunksFromExtractedPage(positionalInfoboxPage, { limit: 400 });
+assert.ok(!('1' in positionalInfoboxResult.infobox));
 
 console.log('wiki-wikitext smoke test passed');
