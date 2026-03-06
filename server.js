@@ -357,10 +357,10 @@ app.get('/api/wiki/batch/resume/:project', (req, res) => {
 // ---- LOCAL WIKI CACHE ----
 app.post('/api/wiki/local/prepare', async (req, res) => {
   try {
-    const { url } = req.body;
+    const { url, forceRefresh } = req.body;
     if (!url) return res.status(400).json({ error: 'URL is required' });
     try { new URL(url); } catch { return res.status(400).json({ error: 'Invalid URL' }); }
-    const result = await prepareLocalWiki(wikiCacheRoot, url);
+    const result = await prepareLocalWiki(wikiCacheRoot, url, { forceRefresh: !!forceRefresh });
     res.json(result);
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -368,7 +368,7 @@ app.post('/api/wiki/local/prepare', async (req, res) => {
 });
 
 app.post('/api/wiki/local/materialize', async (req, res) => {
-  const { url } = req.body;
+  const { url, forceRefresh } = req.body;
   if (!url) return res.status(400).json({ error: 'URL is required' });
 
   res.writeHead(200, {
@@ -387,7 +387,7 @@ app.post('/api/wiki/local/materialize', async (req, res) => {
   res.on('close', () => controller.abort());
 
   try {
-    const manifest = await ingestLocalWiki(wikiCacheRoot, url, sseWriter, controller.signal);
+    const manifest = await ingestLocalWiki(wikiCacheRoot, url, sseWriter, controller.signal, { forceRefresh: !!forceRefresh });
     sseWriter.write('complete', { wiki: manifest, project: manifest.wikiId });
   } catch (e) {
     if (e.message !== 'aborted') sseWriter.write('error', { message: e.message });

@@ -1922,6 +1922,10 @@ class App {
       </p>
       <input class="field-input" type="url" id="batchWikiUrl"
         placeholder="https://terraria.wiki.gg/wiki/Copper_Pickaxe" autofocus>
+      <label style="display:flex;align-items:center;gap:10px;margin:10px 0 6px;font-size:13px;color:var(--text-secondary);">
+        <input type="checkbox" id="batchRefreshWiki">
+        <span>Refresh local wiki cache before build</span>
+      </label>
       <div id="batchDetectStatus" class="wiki-import-status hidden"></div>
       <div class="modal-actions">
         <button class="btn btn-secondary" id="modalCancel">Cancel</button>
@@ -1946,7 +1950,8 @@ class App {
       detectBtn.disabled = true;
 
       try {
-        const result = await api('/wiki/local/prepare', { method: 'POST', body: { url } });
+        const forceRefresh = $('#batchRefreshWiki')?.checked;
+        const result = await api('/wiki/local/prepare', { method: 'POST', body: { url, forceRefresh } });
         const wiki = result.wiki;
         if (result.ready) {
           statusEl.innerHTML = `<i class="bi bi-check-circle"></i> Local cache already exists for <strong>${this._esc(wiki.wikiName)}</strong>.`;
@@ -1955,7 +1960,7 @@ class App {
         }
 
         statusEl.innerHTML = `<i class="bi bi-arrow-repeat spin"></i> Building local cache for <strong>${this._esc(wiki.wikiName)}</strong> via ${this._esc(wiki.acquisition.label)}...`;
-        await this._materializeLocalWiki(wiki, url, statusEl, detectBtn);
+        await this._materializeLocalWiki(wiki, url, statusEl, detectBtn, forceRefresh);
       } catch (e) {
         statusEl.className = 'wiki-import-status wiki-import-error';
         statusEl.textContent = e.message || 'Could not prepare a local wiki from this URL';
@@ -1972,14 +1977,14 @@ class App {
     });
   }
 
-  async _materializeLocalWiki(wiki, url, statusEl, detectBtn) {
+  async _materializeLocalWiki(wiki, url, statusEl, detectBtn, forceRefresh = false) {
     detectBtn.disabled = true;
     detectBtn.innerHTML = '<i class="bi bi-arrow-repeat spin"></i> Building Cache...';
 
     const response = await fetch('/api/wiki/local/materialize', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, forceRefresh }),
     });
 
     let readyWiki = null;
@@ -2071,7 +2076,7 @@ class App {
 
     this.els.modalContent.innerHTML = `
       <div class="modal-title"><i class="bi bi-globe2"></i> ${this._esc(wiki.wikiName)} - Select Categories</div>
-      <p class="modal-text">The wiki is cached locally. Select the categories you want to include in the dataset build.</p>
+      <p class="modal-text">The wiki is cached locally. Select categories to filter the dataset, or leave everything unchecked to build from all content pages. ${wiki.lastSyncAt ? `Last sync: <strong>${this._esc(new Date(wiki.lastSyncAt).toLocaleString())}</strong>.` : ''}</p>
       <input class="batch-category-search" type="text" id="batchCatSearch" placeholder="Search categories...">
       <div class="batch-category-controls">
         <button class="btn btn-secondary" id="batchSelectAll">Select All</button>
@@ -2127,7 +2132,6 @@ class App {
     $('#batchStartBtn').addEventListener('click', () => {
       const selected = [...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
       const projectName = $('#batchProjectName').value.trim() || `${wiki.wikiName}_knowledge_base`;
-      if (!selected.length) { this._toast('Select at least one category', 'error'); return; }
       this._closeModal();
       this.els.modalOverlay.querySelector('.modal').classList.remove('modal--batch');
       this._startBatchImport(wiki, selected, projectName);
@@ -2140,7 +2144,7 @@ class App {
     if (!listEl || !countEl) return;
     const total = listEl.querySelectorAll('input[type="checkbox"]').length;
     const checked = listEl.querySelectorAll('input[type="checkbox"]:checked').length;
-    countEl.textContent = `${checked} of ${total} selected`;
+    countEl.textContent = checked ? `${checked} of ${total} selected` : `0 of ${total} selected · build all pages`;
   }
 
   async _startBatchImport(wiki, categories, projectName) {
@@ -2154,7 +2158,7 @@ class App {
         <i class="bi bi-globe2"></i>
         <div class="batch-panel-title">
           Building: ${this._esc(wiki.wikiName)}
-          <small>${categories.length} categories</small>
+          <small>${categories.length ? `${categories.length} categories` : 'all content pages'}</small>
         </div>
         <button class="batch-panel-toggle" id="batchToggle" title="Collapse"><i class="bi bi-dash-lg"></i></button>
       </div>
@@ -2162,7 +2166,7 @@ class App {
         <div class="batch-stats-row">
           <div class="batch-stat">
             <div class="batch-stat-label">Categories</div>
-            <div class="batch-stat-value" id="batchStatCat">0 / ${categories.length}</div>
+            <div class="batch-stat-value" id="batchStatCat">0 / ${categories.length || 1}</div>
             <div class="batch-progress-bar"><div class="batch-progress-fill" id="batchBarCat"></div></div>
           </div>
           <div class="batch-stat">
@@ -2354,6 +2358,15 @@ class App {
 
     const summary = `${data.categoriesDone || 0} categories, ${data.pagesDone || 0} pages, ${data.chunksCreated || 0} chunks - ${elapsed}`;
     this._batchLog(cancelled ? `Cancelled. ${summary}` : `Done! ${summary}`, cancelled ? 'error' : 'success');
+    if (data.skipReasons && data.skipped) {
+      const parts = [];
+      if (data.skipReasons.nonContent) parts.push(`non-content ${data.skipReasons.nonContent}`);
+      if (data.skipReasons.category) parts.push(`category filter ${data.skipReasons.category}`);
+      if (data.skipReasons.duplicatePage) parts.push(`duplicate page ${data.skipReasons.duplicatePage}`);
+      if (data.skipReasons.lowQuality) parts.push(`low quality ${data.skipReasons.lowQuality}`);
+      if (data.skipReasons.duplicateChunkId) parts.push(`duplicate chunk id ${data.skipReasons.duplicateChunkId}`);
+      if (parts.length) this._batchLog(`Skipped breakdown: ${parts.join(', ')}`, 'dim');
+    }
 
     if (!cancelled && projectName) {
       (async () => {
